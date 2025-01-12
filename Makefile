@@ -11,11 +11,11 @@ FB_EXT := .cpp
 endif
 
 # Flags
-CFLAGS := -Wall -std=c11
+CFLAGS := -Wall -std=c11 -D_POSIX_C_SOURCE=200809L -fsanitize=address
 CXXFLAGS := -Wall -Wno-register -std=c++17
 FFLAGS :=
 BFLAGS := -d
-LDFLAGS :=
+LDFLAGS := -lasan
 
 # Debug flags
 DEBUG ?= 1
