@@ -1,13 +1,9 @@
-/**
- * Type extensions for AST.
- */
-
 #ifndef _TYPES_H_
 #define _TYPES_H_
 
 #include <stdbool.h>
 
-#define ID_MAX 32
+#define IDENT_MAX 32
 
 enum ast_kind_e {
 	AST_UNKNOWN = 0,
@@ -88,7 +84,7 @@ static const char *AST_KIND_STRINGS[] = {
 union ast_value_u {
 	int i;
 	float f;
-	char s[ID_MAX];
+	char s[IDENT_MAX];
 };
 
 struct ast_data_t {

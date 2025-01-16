@@ -13,17 +13,18 @@ extern char *yytext;
 
 /* state variables */
 extern bool error;
-struct node_t *program = NULL;
+struct node_t *comp_unit = NULL;
 
-/* variables for flattening lists, currently unused */
-struct node_t *this_ExtDefList = NULL;
-struct node_t *this_ExtDecList = NULL;
-struct node_t *this_VarDec = NULL;
-struct node_t *this_VarList = NULL;
-struct node_t *this_DefList = NULL;
-struct node_t *this_DecList = NULL;
-struct node_t *this_StmtList = NULL;
-struct node_t *this_Args = NULL;
+/* helper function */
+static void vfree(int count, ...)
+{
+	va_list args;
+	va_start(args, count);
+	for (int i = 0; i < count; ++i) {
+		free(va_arg(args, void *));
+	}
+	va_end(args);
+}
 %}
 
 %union {
@@ -59,45 +60,45 @@ struct node_t *this_Args = NULL;
 
 %%
 
-/* Lv1 */
 CompUnit:
 	FuncDef {
 		// FIXME: yylineno reporting wrong line number
 		$$ = ast_nterm(AST_CompUnit, yylineno, 1, $1);
-		program = $$;
+		comp_unit = $$;
 	}
 	;
+
 FuncDef:
 	FuncType IDENT LP RP Block {
 		$$ = ast_nterm(AST_FuncDef, yylineno, 3,
 			       $1, ast_term(AST_IDENT, $2), $5);
-		free($2);
-		free($3);
-		free($4);
+		vfree(3, $2, $3, $4);
 	}
 	;
+
 FuncType:
 	TYPE {
 		$$ = ast_nterm(AST_FuncType, yylineno, 1,
 			       ast_term(AST_TYPE, $1));
-		free($1);
+		vfree(1, $1);
 	}
 	;
+
 Block:
 	LC Stmt RC {
 		$$ = ast_nterm(AST_Block, yylineno, 1, $2);
-		free($1);
-		free($3);
+		vfree(2, $1, $3);
 	}
 	;
+
 Stmt:
 	RETURN Number SEMI {
 		$$ = ast_nterm(AST_Stmt, yylineno, 2,
 			       ast_term(AST_RETURN, $1), $2);
-		free($1);
-		free($3);
+		vfree(2, $1, $3);
 	}
 	;
+
 Number:
 	INT_CONST {
 		$$ = ast_nterm(AST_Number, yylineno, 1,
@@ -109,8 +110,7 @@ Number:
 
 int yyerror(char *msg)
 {
-	fprintf(stderr, "Error type B at Line %d: Unexpected \"%s\"", yylineno,
-		yytext);
-
 	error = true;
+	return fprintf(stderr, "Error type B at Line %d: Unexpected \"%s\"",
+		       yylineno, yytext);
 }
