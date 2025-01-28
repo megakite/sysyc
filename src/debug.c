@@ -72,9 +72,8 @@ static void debug_slice_shallow(const koopa_raw_slice_t *slice)
 	assert(slice);
 
 	LOG("[ /* %d, &%s */ ", slice->len, ITEM_KIND_S[slice->kind]);
-	for (uint32_t i = 0; i < slice->len; ++i) {
+	for (uint32_t i = 0; i < slice->len; ++i)
 		LOG("%p, ", slice->buffer[i]);
-	}
 	LOG("], ");
 }
 
@@ -83,8 +82,10 @@ static void debug_slice(const koopa_raw_slice_t *slice)
 	assert(slice);
 
 	LOG("[ /* %d, %s */ ", slice->len, ITEM_KIND_S[slice->kind]);
-	for (uint32_t i = 0; i < slice->len; ++i) {
-		switch (slice->kind) {
+	for (uint32_t i = 0; i < slice->len; ++i)
+	{
+		switch (slice->kind)
+		{
 		case KOOPA_RSIK_UNKNOWN:
 			assert(false /* unknown slice type */);
 			break;
@@ -107,7 +108,8 @@ static void debug_slice(const koopa_raw_slice_t *slice)
 
 void _debug_program(const koopa_raw_program_t *program)
 {
-	if (!program) {
+	if (!program)
+	{
 		LOG("{}\n");
 		return;
 	}
@@ -125,17 +127,19 @@ void _debug_program(const koopa_raw_program_t *program)
 /* accessor defn.s */
 void _debug_type(koopa_raw_type_t raw)
 {
-	if (!raw) {
+	if (!raw)
+	{
 		LOG("{ /* Type */ }, ");
 		return;
 	}
 
-	LOG("{ /* Type */ ");
+	LOG("{ /* Type at %p */ ", raw);
 
 	LOG("tag: '%s', ", TYPE_TAG_S[raw->tag]);
 
 	LOG("data: { ");
-	switch (raw->tag) {
+	switch (raw->tag)
+	{
 	case KOOPA_RTT_INT32:
 	case KOOPA_RTT_UNIT:
 		break;
@@ -161,12 +165,13 @@ void _debug_type(koopa_raw_type_t raw)
 
 void _debug_function(koopa_raw_function_t raw)
 {
-	if (!raw) {
+	if (!raw)
+	{
 		LOG("{ /* Function */ }, ");
 		return;
 	}
 
-	LOG("{ /* Function */ ");
+	LOG("{ /* Function at %p */ ", raw);
 
 	LOG("ty: ");
 	_debug_type(raw->ty);
@@ -181,7 +186,8 @@ void _debug_function(koopa_raw_function_t raw)
 
 void _debug_basic_block(koopa_raw_basic_block_t raw)
 {
-	if (!raw) {
+	if (!raw)
+	{
 		LOG("{ /* Basic block */ }, ");
 		return;
 	}
@@ -201,7 +207,8 @@ void _debug_basic_block(koopa_raw_basic_block_t raw)
 
 void _debug_value(koopa_raw_value_t raw)
 {
-	if (!raw) {
+	if (!raw)
+	{
 		LOG("{ /* Value */ }, ");
 		return;
 	}
@@ -223,7 +230,7 @@ void _debug_value(koopa_raw_value_t raw)
 		break;
 	case KOOPA_RVT_ZERO_INIT:
 	case KOOPA_RVT_UNDEF:
-		assert(false /* unimplemented */);
+		assert(false /* todo */);
 		break;
 	case KOOPA_RVT_AGGREGATE:
 		LOG("elems: ");
@@ -238,7 +245,7 @@ void _debug_value(koopa_raw_value_t raw)
 			raw->kind.data.block_arg_ref.index);
 		break;
 	case KOOPA_RVT_ALLOC:
-		assert(false /* unimplemented */);
+		assert(false /* todo */);
 		break;
 	case KOOPA_RVT_GLOBAL_ALLOC:
 		LOG("init: ");
@@ -267,7 +274,7 @@ void _debug_value(koopa_raw_value_t raw)
 		_debug_value(raw->kind.data.get_elem_ptr.index);
 		break;
 	case KOOPA_RVT_BINARY:
-		LOG("op: %d, ", raw->kind.data.binary.op);
+		LOG("op: '%s', ", BINARY_OP_S[raw->kind.data.binary.op]);
 		LOG("lhs: ");
 		_debug_value(raw->kind.data.binary.lhs);
 		LOG("rhs: ");

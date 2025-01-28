@@ -13,7 +13,7 @@ extern char *yytext;
 
 /* state variables */
 extern bool error;
-struct node_t *comp_unit = NULL;
+struct node_t *comp_unit;
 
 /* helper function */
 static void vfree(int count, ...)
@@ -27,42 +27,43 @@ static void vfree(int count, ...)
 }
 %}
 
+/* TODO: maybe add float support? */
 %union {
 	int i;
-	float f;
+	int f;
 	char *s;
 	struct node_t *n;
 }
 
 /* tokens */
 %token <i> INT_CONST
-%token <f> FLOAT
-%token <s> IDENT SEMI COMMA ASSIGNOP RELOP PLUS MINUS STAR DIV AND OR DOT NOT
+%token <s> IDENT SEMI COMMA ASSIGNOP RELOP EQOP ADDOP UNARYOP MULOP LAND LOR DOT
 	   TYPE LP RP LB RB LC RC STRUCT RETURN IF ELSE WHILE
 
 /* nonterminals */
 %type <n> CompUnit FuncDef FuncType Block Stmt Number
+	  Exp PrimaryExp UnaryExp
 
 /* association and precedence */
-%right ASSIGNOP
-%left OR
-%left AND
+// %right ASSIGNOP
+%left LOR
+%left LAND
+%left EQOP
 %left RELOP
-%left PLUS MINUS
-%left STAR DIV
-// TODO: treat unary negation rightly
-%right NOT // MINUS
-%left LP RP LB RB DOT
+%left ADDOP
+%left MULOP
+%right UNARYOP
+// %left LP RP LB RB DOT
 
 /* avoid dangling else */
-%nonassoc LOWER_THAN_ELSE
-%nonassoc ELSE
+// %nonassoc LOWER_THAN_ELSE
+// %nonassoc ELSE
 
 %%
 
 CompUnit:
 	FuncDef {
-		// FIXME: yylineno reporting wrong line number
+		/* FIXME: yylineno reporting wrong line number */
 		$$ = ast_nterm(AST_CompUnit, yylineno, 1, $1);
 		comp_unit = $$;
 	}
@@ -80,7 +81,7 @@ FuncType:
 	TYPE {
 		$$ = ast_nterm(AST_FuncType, yylineno, 1,
 			       ast_term(AST_TYPE, $1));
-		vfree(1, $1);
+		free($1);
 	}
 	;
 
@@ -92,7 +93,7 @@ Block:
 	;
 
 Stmt:
-	RETURN Number SEMI {
+	RETURN Exp SEMI {
 		$$ = ast_nterm(AST_Stmt, yylineno, 2,
 			       ast_term(AST_RETURN, $1), $2);
 		vfree(2, $1, $3);
@@ -103,6 +104,69 @@ Number:
 	INT_CONST {
 		$$ = ast_nterm(AST_Number, yylineno, 1,
 			       ast_term(AST_INT_CONST, $1));
+	}
+	;
+
+Exp:
+	Exp LOR Exp {
+		$$ = ast_nterm(AST_Exp, yylineno, 3,
+			       $1, ast_term(AST_LOR, $2), $3);
+		free($2);
+	}
+	| Exp LAND Exp {
+		$$ = ast_nterm(AST_Exp, yylineno, 3,
+			       $1, ast_term(AST_LAND, $2), $3);
+		free($2);
+	}
+	| Exp EQOP Exp {
+		$$ = ast_nterm(AST_Exp, yylineno, 3,
+			       $1, ast_term(AST_EQOP, $2), $3);
+		free($2);
+	}
+	| Exp RELOP Exp {
+		$$ = ast_nterm(AST_Exp, yylineno, 3,
+			       $1, ast_term(AST_RELOP, $2), $3);
+		free($2);
+	}
+	| Exp ADDOP Exp {
+		$$ = ast_nterm(AST_Exp, yylineno, 3,
+			       $1, ast_term(AST_ADDOP, $2), $3);
+		free($2);
+	}
+	| Exp MULOP Exp {
+		$$ = ast_nterm(AST_Exp, yylineno, 3,
+			       $1, ast_term(AST_MULOP, $2), $3);
+		free($2);
+	}
+	| UnaryExp {
+		$$ = ast_nterm(AST_Exp, yylineno, 1, $1);
+	}
+	;
+
+PrimaryExp:
+	LP Exp RP {
+		$$ = ast_nterm(AST_PrimaryExp, yylineno, 1, $2);
+		vfree(2, $1, $3);
+	}
+	| Number {
+		$$ = ast_nterm(AST_PrimaryExp, yylineno, 1, $1);
+	}
+	;
+
+UnaryExp:
+	PrimaryExp {
+		$$ = ast_nterm(AST_UnaryExp, yylineno, 1, $1);
+	}
+	| UNARYOP UnaryExp {
+		$$ = ast_nterm(AST_UnaryExp, yylineno, 2,
+			       ast_term(AST_UNARYOP, $1), $2);
+		free($1);
+	}
+	| ADDOP UnaryExp {
+		// HACK: basically every ADDOP is also a UNARYOP
+		$$ = ast_nterm(AST_UnaryExp, yylineno, 2,
+			       ast_term(AST_UNARYOP, $1), $2);
+		free($1);
 	}
 	;
 

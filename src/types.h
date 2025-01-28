@@ -14,14 +14,13 @@ enum ast_kind_e {
 	AST_COMMA,
 	AST_ASSIGNOP,
 	AST_RELOP,
-	AST_PLUS,
-	AST_MINUS,
-	AST_STAR,
-	AST_DIV,
-	AST_AND,
-	AST_OR,
+	AST_EQOP,
+	AST_ADDOP,
+	AST_UNARYOP,
+	AST_MULOP,
+	AST_LAND,
+	AST_LOR,
 	AST_DOT,
-	AST_NOT,
 	AST_TYPE,
 	AST_LP,
 	AST_RP,
@@ -41,9 +40,12 @@ enum ast_kind_e {
 	AST_Block,
 	AST_Stmt,
 	AST_Number,
+	AST_Exp,
+	AST_PrimaryExp,
+	AST_UnaryExp,
 };
 
-static const char *AST_KIND_STRINGS[] = {
+static const char *AST_KIND_S[] = {
 	"UNKNOWN",
 	"INT_CONST",
 	"FLOAT",
@@ -52,14 +54,13 @@ static const char *AST_KIND_STRINGS[] = {
 	"COMMA",
 	"ASSIGNOP",
 	"RELOP",
-	"PLUS",
-	"MINUS",
-	"STAR",
-	"DIV",
-	"AND",
-	"OR",
+	"EQOP",
+	"ADDOP",
+	"UNARYOP",
+	"MULOP",
+	"LAND",
+	"LOR",
 	"DOT",
-	"NOT",
 	"TYPE",
 	"LP",
 	"RP",
@@ -79,17 +80,19 @@ static const char *AST_KIND_STRINGS[] = {
 	"Block",
 	"Stmt",
 	"Number",
+	"Exp",
+	"PrimaryExp",
+	"UnaryExp",
 };
 
 union ast_value_u {
 	int i;
-	float f;
 	char s[IDENT_MAX];
 };
 
 struct ast_data_t {
 	bool terminal;
-	int line;
+	int lineno;
 	enum ast_kind_e kind;
 	union ast_value_u value;
 };

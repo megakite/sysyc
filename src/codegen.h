@@ -5,6 +5,6 @@
 
 #include "koopa.h"
 
-void codegen(const koopa_raw_program_t *program, FILE *file);
+void codegen(const koopa_raw_program_t *program, FILE *output);
 
 #endif//_CODEGEN_H_

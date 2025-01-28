@@ -3,6 +3,7 @@
 
 #include "koopa.h"
 #include "node.h"
+#include "vector.h"
 
 /**
  * Generate Koopa raw program from AST.
