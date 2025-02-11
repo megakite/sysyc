@@ -95,9 +95,17 @@ $(BUILD_DIR)/%.tab$(FB_EXT): $(SRC_DIR)/%.y
 	$(BISON) $(BFLAGS) -o $@ $<
 
 
-.PHONY: clean
+.PHONY: clean debug riscv
 
 clean:
 	-rm -rf $(BUILD_DIR)
+
+debug:
+	@$(BUILD_DIR)/compiler -debug test.c test.ll test.S 2> debug.json5
+	@formatjson5 -i 2 -r debug.json5
+
+riscv:
+	@$(BUILD_DIR)/compiler -riscv test.c test.ll test.S 2> riscv.json5
+	@formatjson5 -i 2 -r riscv.json5
 
 -include $(DEPS)

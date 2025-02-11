@@ -4,19 +4,15 @@
 #include <assert.h>
 
 #include "ast.h"
-#include "types.h"
 
 struct node_t *ast_nterm(enum ast_kind_e kind, int lineno, int count, ...)
 {
 	assert(kind > AST_END_OF_TERM);
 
 	struct node_data_t data = {
-		.tag = NODE_AST,
-		.ast = {
-			.kind = kind,
-			.terminal = false,
-			.lineno = lineno,
-		}
+		.kind = kind,
+		.terminal = false,
+		.lineno = lineno,
 	};
 	struct node_t *new = node_new(data, count);
 
@@ -37,12 +33,9 @@ struct node_t *_ast_term_int(enum ast_kind_e kind, int value)
 	assert(kind < AST_END_OF_TERM);
 
 	struct node_data_t data = {
-		.tag = NODE_AST,
-		.ast = {
-			.terminal = true,
-			.kind = kind,
-			.value.i = value,
-		}
+		.terminal = true,
+		.kind = kind,
+		.value.i = value,
 	};
 
 	return node_new(data, 0);
@@ -54,14 +47,11 @@ struct node_t *_ast_term_string(enum ast_kind_e kind, const char *value)
 	assert(kind < AST_END_OF_TERM);
 
 	struct node_data_t data = {
-		.tag = NODE_AST,
-		.ast = {
-			.terminal = true,
-			.kind = kind,
-		},
+		.terminal = true,
+		.kind = kind,
 	};
-	strncpy(data.ast.value.s, value, IDENT_MAX);
-	data.ast.value.s[IDENT_MAX - 1] = '\0';
+	strncpy(data.value.s, value, IDENT_MAX);
+	data.value.s[IDENT_MAX - 1] = '\0';
 
 	return node_new(data, 0);
 }
@@ -69,19 +59,18 @@ struct node_t *_ast_term_string(enum ast_kind_e kind, const char *value)
 static void lambda_print(void *ptr, int depth)
 {
 	struct node_t *node = ptr;
+	struct node_data_t *data = &node->data;
 
 	for (int i = 0; i < depth * 2; ++i)
 		putchar(' ');
 
-	struct ast_data_t *ast = &node->data.ast;
-
-	switch (ast->kind)
+	switch (data->kind)
 	{
 	case AST_UNKNOWN:
 		assert(false /* unreachable */);
 		break;
 	case AST_INT_CONST:
-		printf("%s : %d\n", AST_KIND_S[ast->kind], ast->value.i);
+		printf("%s : %d\n", AST_KIND_S[data->kind], data->value.i);
 		break;
 	case AST_IDENT:
 	case AST_TYPE:
@@ -90,13 +79,14 @@ static void lambda_print(void *ptr, int depth)
 	case AST_ADDOP:
 	case AST_MULOP:
 	case AST_UNARYOP:
-		printf("%s : %s\n", AST_KIND_S[ast->kind], ast->value.s);
+		printf("%s : %s\n", AST_KIND_S[data->kind], data->value.s);
 		break;
 	default:
-		if (ast->terminal)
-			printf("%s\n", AST_KIND_S[ast->kind]);
+		if (data->terminal)
+			printf("%s\n", AST_KIND_S[data->kind]);
 		else
-			printf("%s (%d)\n", AST_KIND_S[ast->kind], ast->lineno);
+			printf("%s (%d)\n", AST_KIND_S[data->kind],
+			       data->lineno);
 	}
 }
 

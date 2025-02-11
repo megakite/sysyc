@@ -2,7 +2,6 @@
 #include <stdio.h>
 
 #include "node.h"
-#include "types.h"
 
 struct node_t *node_new(struct node_data_t data, int capacity)
 {

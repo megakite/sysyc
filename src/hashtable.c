@@ -4,6 +4,27 @@
 
 #include "hashtable.h"
 
+/* opaque type definitions */
+struct _ht_ptru32_item_t {
+	struct _ht_ptru32_item_t *next;
+	uint32_t value;
+	void *key;
+};
+
+struct _ht_ptru32_t {
+	struct _ht_ptru32_item_t *data[HASHTABLE_SIZE];
+};
+
+struct _ht_strsym_item_t {
+	struct _ht_strsym_item_t *next;
+	struct symbol_t value;
+	char key[];
+};
+
+struct _ht_strsym_t {
+	struct _ht_strsym_item_t *data[HASHTABLE_SIZE];
+};
+
 /* hash functions */
 static uint8_t hash_str(char *key)
 {
@@ -27,9 +48,10 @@ inline static uint8_t hash_ptr(void *p)
 }
 
 /* tool functions */
-static struct _ht_strptr_item_t *ht_strptr_item_new(char *key, void *value)
+static struct _ht_strsym_item_t *ht_strsym_item_new(char *key,
+						    struct symbol_t value)
 {
-	struct _ht_strptr_item_t *new = malloc(sizeof(*new) + strlen(key) + 1);
+	struct _ht_strsym_item_t *new = malloc(sizeof(*new) + strlen(key) + 1);
 	new->next = NULL;
 	new->value = value;
 	strcpy(new->key, key);
@@ -48,16 +70,16 @@ static struct _ht_ptru32_item_t *ht_ptru32_item_new(void *key, uint32_t value)
 }
 
 /* HashTable<String, Ptr> */
-ht_strptr_t ht_strptr_new(void)
+ht_strsym_t ht_strsym_new(void)
 {
-	struct _ht_strptr_t *new = calloc(1, sizeof(*new));
+	struct _ht_strsym_t *new = calloc(1, sizeof(*new));
 	return new;
 }
 
-void **ht_strptr_find(ht_strptr_t table, char *key)
+struct symbol_t *ht_strsym_find(ht_strsym_t table, char *key)
 {
 	uint8_t i = hash_str(key);
-	struct _ht_strptr_item_t *item = table->data[i];
+	struct _ht_strsym_item_t *item = table->data[i];
 	if (!item)
 		return NULL;
 
@@ -70,13 +92,13 @@ void **ht_strptr_find(ht_strptr_t table, char *key)
 	return NULL;
 }
 
-void ht_strptr_upsert(ht_strptr_t table, char *key, void *value)
+void ht_strsym_upsert(ht_strsym_t table, char *key, struct symbol_t value)
 {
 	uint8_t i = hash_str(key);
-	struct _ht_strptr_item_t *item = table->data[i];
+	struct _ht_strsym_item_t *item = table->data[i];
 	if (!item)
 	{
-		table->data[i] = ht_strptr_item_new(key, value);
+		table->data[i] = ht_strsym_item_new(key, value);
 		return;
 	}
 
@@ -89,15 +111,17 @@ void ht_strptr_upsert(ht_strptr_t table, char *key, void *value)
 		}
 		item = item->next;
 	}
-	item = ht_strptr_item_new(key, value);
+	struct _ht_strsym_item_t *new = ht_strsym_item_new(key, value);
+	new->next = table->data[i]->next;
+	table->data[i] = new;
 }
 
-void ht_strptr_delete(ht_strptr_t table)
+void ht_strsym_delete(ht_strsym_t table)
 {
 	for (size_t i = 0; i < HASHTABLE_SIZE; ++i)
 	{
-		struct _ht_strptr_item_t *item = table->data[i];
-		struct _ht_strptr_item_t *next;
+		struct _ht_strsym_item_t *item = table->data[i];
+		struct _ht_strsym_item_t *next;
 		while (item)
 		{
 			next = item->next;
@@ -150,7 +174,9 @@ void ht_ptru32_upsert(ht_ptru32_t table, void *key, uint32_t value)
 		}
 		item = item->next;
 	}
-	item = ht_ptru32_item_new(key, value);
+	struct _ht_ptru32_item_t *new = ht_ptru32_item_new(key, value);
+	new->next = table->data[i]->next;
+	table->data[i] = new;
 }
 
 void ht_ptru32_delete(ht_ptru32_t table)

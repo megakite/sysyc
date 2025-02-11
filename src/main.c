@@ -1,14 +1,17 @@
 #include <assert.h>
+#include <setjmp.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
-#include "node.h"
 #include "ast.h"
-#include "debug.h"
-#include "memir.h"
-#include "koopaext.h"
+#include "semantic.h"
+#include "ir.h"
 #include "codegen.h"
+
+#include "koopaext.h"
+#include "debug.h"
+#include "exception.h"
 
 #include "koopa.h"
 
@@ -31,7 +34,7 @@ int main(int argc, char **argv)
 	const char *output = argv[4];
 
 	/* reference mode */
-	if (strcmp(mode, "-reference") == 0)
+	if (strcmp(mode, "-debug") == 0)
 	{
 		koopa_program_t program;
 		koopa_error_code_t ret = koopa_parse_from_file(middle,
@@ -50,93 +53,52 @@ int main(int argc, char **argv)
 		return 0;
 	}
 
-	/* compile to IR */
-	if (strcmp(mode, "-koopa") == 0)
+	/* parse */
+	printf("======= Parsing...\n");
+	yyin = fopen(input, "r");
+	if (!yyin)
 	{
-		/* parse */
-		yyin = fopen(input, "r");
-		if (!yyin) {
-			perror(input);
-			return 1;
-		}
-
-		printf("======= Parsing...\n");
-		yyparse();
-
-		/* check error from lexer/parser */
-		if (error) {
-			return 1;
-		}
-
-		/* print out AST */
-		printf("======= Abstract syntax tree (AST)\n");
-		ast_print(comp_unit);
-
-		/* generate memory IR */
-		printf("======= Generating memory IR...\n");
-		koopa_raw_program_t memir = memir_gen(comp_unit);
-
-		/* log memory IR */
-		printf("======= Logging memory IR into stderr...\n");
-		debug(&memir);
-
-		/* try to convert memory IR into raw koopa program */
-		printf("======= Verifying memory IR integrity...\n");
-		koopa_program_t program;
-		koopa_error_code_t ret = koopa_generate_raw_to_koopa(&memir,
-								     &program);
-		assert(ret == KOOPA_EC_SUCCESS);
-
-		/* dump IR */
-		printf("======= Dumping text-form Koopa IR...\n");
-		koopa_dump_to_file(program, output);
-
-		/* cleanup */
-		printf("======= Cleaning up...\n");
-		koopa_delete_program(program);
-		koopa_delete_raw_program(&memir);
-		node_delete(comp_unit);
-
-		return 0;
+		perror(input);
+		return 1;
 	}
+	yyparse();
+	fclose(yyin);
+
+	/* check error from lexer/parser */
+	if (error)
+		return 1;
+
+#if 0
+	/* print AST */
+	printf("======= Abstract syntax tree (AST)\n");
+	ast_print(comp_unit);
+#endif
+
+	/* semantic analysis */
+	if (setjmp(exception_env) == 0)
+		semantic(comp_unit);
+	else
+		goto cleanup_comp_unit;
+
+	/* generate memory IR */
+	printf("======= Generating memory IR...\n");
+	bump_t bump = bump_new();
+	koopa_raw_program_set_allocator(bump);
+	koopa_raw_program_t raw = ir(comp_unit);
+
+	/* log memory IR */
+	printf("======= Logging memory IR into stderr...\n");
+	debug(&raw);
+
+	/* try to convert memory IR into raw koopa program */
+	printf("======= Verifying memory IR integrity...\n");
+	koopa_program_t program;
+	koopa_error_code_t ret = koopa_generate_raw_to_koopa(&raw, &program);
+	assert(ret == KOOPA_EC_SUCCESS);
 
 	/* compile to RISC-V assembly */
 	if (strcmp(mode, "-riscv") == 0)
 	{
-		/* parse */
-		yyin = fopen(input, "r");
-		if (!yyin) {
-			perror(input);
-			return 1;
-		}
-
-		printf("======= Parsing...\n");
-		yyparse();
-
-		/* check error from lexer/parser */
-		if (error) {
-			return 1;
-		}
-
-		/* print out AST */
-		printf("======= Abstract syntax tree (AST)\n");
-		ast_print(comp_unit);
-
-		/* generate memory IR */
-		printf("======= Generating memory IR...\n");
-		koopa_raw_program_t memir = memir_gen(comp_unit);
-
-		/* log memory IR */
-		printf("======= Logging memory IR into stderr...\n");
-		debug(&memir);
-
-		/* try to convert memory IR into raw koopa program */
-		printf("======= Verifying memory IR integrity...\n");
-		koopa_program_t program;
-		koopa_error_code_t ret = koopa_generate_raw_to_koopa(&memir,
-								     &program);
-		assert(ret == KOOPA_EC_SUCCESS);
-
 		/* dump IR */
 		printf("======= Dumping text-form Koopa IR...\n");
 		koopa_dump_to_file(program, middle);
@@ -144,19 +106,24 @@ int main(int argc, char **argv)
 		/* generate assembly */
 		FILE *f = fopen(output, "w");
 		printf("======= Generating assembly...\n");
-		codegen(&memir, f);
+		codegen(&raw, f);
 		fclose(f);
-
-		/* cleanup */
-		printf("======= Cleaning up...\n");
-		koopa_delete_program(program);
-		koopa_delete_raw_program(&memir);
-		node_delete(comp_unit);
-
-		return 0;
 	}
 
-	printf("usage: %s [-reference|-koopa|-riscv] <input> <middle> <output>"
-	       "\n", argv[0]);
-	return 1;
+	/* generate Koopa IR */
+	if (strcmp(mode, "-koopa") == 0)
+	{
+		/* dump IR */
+		printf("======= Dumping text-form Koopa IR...\n");
+		koopa_dump_to_file(program, output);
+	}
+
+	/* cleanup */
+	printf("======= Cleaning up...\n");
+	koopa_delete_program(program);
+	bump_delete(bump);
+cleanup_comp_unit:
+	node_delete(comp_unit);
+
+	return 0;
 }

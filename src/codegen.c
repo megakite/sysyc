@@ -8,137 +8,174 @@
 
 #include "hashtable.h"
 #include "codegen.h"
-
-#define EMIT(format, ...) fprintf(g_output, format __VA_OPT__(,) __VA_ARGS__)
+#include "koopaext.h"
 
 /* Optional<Either<ValuePtr, ValueIndex>> */
-struct either_t {
+struct variant_t {
 	enum {
-		NONE = 0,
+		NIL = 0,
 		VALUE,
 		INDEX,
+		OFFSET,
 	} tag;
 	union {
 		koopa_raw_value_t value;
 		uint32_t index;
+		uint32_t offset;
 	};
 };
 
 /* state variables */
-static FILE *g_output;
+static FILE *m_output;
+static ht_ptru32_t m_ht_insts;
+static ht_ptru32_t m_ht_offsets;
+static uint32_t m_inst_idx;
+static uint8_t m_reg_t_idx;
+static int m_stack_offset;
 
-static ht_ptru32_t g_ht_insts;
+/* emitter */
+#define EMIT(format, ...) fprintf(m_output, format __VA_OPT__(,) __VA_ARGS__)
 
-static uint32_t g_inst_idx;
-static uint8_t g_reg_t_idx;
+static void OPER(const char *op, unsigned times)
+{
+	assert(times >= 0 && times <= 3);
 
-/* destructors */
-static struct either_t codegen_value(koopa_raw_value_t raw);
+	switch (times)
+	{
+	case 0:
+		/* dedicated for `sw` */
+		EMIT("  %s ", op);
+		break;
+	case 1:
+		/* one output */
+		if (m_inst_idx < 7)
+			EMIT("  %s t%d, ", op, m_inst_idx);
+		else
+			EMIT("  %s a%d, ", op, m_inst_idx - 7);
+		break;
+	case 2:
+		/* self repeating */
+		if (m_inst_idx < 7)
+			EMIT("  %s t%d, t%d\n", op, m_inst_idx, m_inst_idx);
+		else
+			EMIT("  %s a%d, a%d\n", op, m_inst_idx - 7,
+			     m_inst_idx - 7);
+		break;
+	case 3:
+		if (m_inst_idx < 7)
+			EMIT("  %s t%d, t%d, t%d\n", op, m_inst_idx, m_inst_idx,
+			     m_inst_idx);
+		else
+			EMIT("  %s a%d, a%d, a%d\n", op, m_inst_idx - 7,
+			     m_inst_idx - 7, m_inst_idx - 7);
+		break;
+	}
+}
+
+static void OPND(struct variant_t *variant, bool newline)
+{
+	switch (variant->tag)
+	{
+	case VALUE:
+		if (variant->value->kind.tag == KOOPA_RVT_INTEGER &&
+		    variant->value->kind.data.integer.value == 0)
+			EMIT(newline ? "x0\n" : "x0, ");
+		else
+		{
+			if (--m_reg_t_idx < 7)
+				EMIT(newline ? "t%d\n" : "t%d, ", m_reg_t_idx);
+			else
+				EMIT(newline ? "a%d\n" : "a%d, ",
+				     m_reg_t_idx - 7);
+		}
+		break;
+	case INDEX:
+		if (variant->index < 7)
+			EMIT(newline ? "t%d\n" : "t%d, ", variant->index);
+		else
+			EMIT(newline ? "a%d\n" : "a%d, ", variant->index - 7);
+		break;
+	case OFFSET:
+		EMIT(newline ? "%d(sp)\n" : "%d(sp)", variant->offset);
+		break;
+	default:
+		assert(false /* missing value */);
+	}
+}
+
+/* declarations */
+static struct variant_t codegen_value(koopa_raw_value_t raw);
 static void codegen_basic_block(koopa_raw_basic_block_t basic_block);
 static void codegen_function(koopa_raw_function_t function);
 static void codegen_type(koopa_raw_type_t type);
 
-static void codegen_slice(const koopa_raw_slice_t *slice)
+/* utilities */
+static void reserve_stack(void *block)
 {
-	switch (slice->kind)
+	koopa_raw_basic_block_t _block = block;
+	for (uint32_t i = 0; i < _block->insts.len; ++i)
 	{
-	case KOOPA_RSIK_UNKNOWN:
-		assert(false /* unknown slice type */);
-		break;
-	case KOOPA_RSIK_TYPE:
-		for (uint32_t i = 0; i < slice->len; ++i)
-			codegen_type(slice->buffer[i]);
-		break;
-	case KOOPA_RSIK_FUNCTION:
-		for (uint32_t i = 0; i < slice->len; ++i)
-			codegen_function(slice->buffer[i]);
-		break;
-	case KOOPA_RSIK_BASIC_BLOCK:
-		for (uint32_t i = 0; i < slice->len; ++i)
-			codegen_basic_block(slice->buffer[i]);
-		break;
-	case KOOPA_RSIK_VALUE:
-		for (uint32_t i = 0; i < slice->len; ++i)
-		{
-			// register t_n should start from index of current value
-			g_reg_t_idx = g_inst_idx = i;
-			codegen_value(slice->buffer[i]);
-		}
-		break;
+		koopa_raw_value_t value = _block->insts.buffer[i];
+		if (value->ty->tag != KOOPA_RTT_POINTER)
+			continue;
+
+		// it's so sad that C doesn't have closures...which means i need
+		// to declare another member to record the offset.
+		ht_ptru32_upsert(m_ht_offsets, value, -m_stack_offset);
+		m_stack_offset -= sizeof(int32_t);
 	}
 }
 
-static void OPER(const char *op, unsigned times)
+/* allocator */
+static void function_prologue(koopa_raw_function_t function)
 {
-	assert(times > 0 && times < 4);
-
-	if (times == 1)
-	{
-		if (g_inst_idx < 7)
-			EMIT("  %s t%d, ", op, g_inst_idx);
-		else
-			EMIT("  %s a%d, ", op, g_inst_idx - 7);
-	}
-	else if (times == 2)
-	{
-		if (g_inst_idx < 7)
-			EMIT("  %s t%d, t%d\n", op, g_inst_idx, g_inst_idx);
-		else
-			EMIT("  %s a%d, a%d\n", op, g_inst_idx - 7,
-			     g_inst_idx - 7);
-	}
-	else if (times == 3)
-	{
-		if (g_inst_idx < 7)
-			EMIT("  %s t%d, t%d, t%d\n", op, g_inst_idx, g_inst_idx,
-			     g_inst_idx);
-		else
-			EMIT("  %s a%d, a%d, a%d\n", op, g_inst_idx - 7,
-			     g_inst_idx - 7, g_inst_idx - 7);
-	}
+	slice_iter(&function->bbs, reserve_stack);
+	// align to 16 bytes
+	m_stack_offset &= -16;
+	EMIT("  addi sp, sp, %d\n", m_stack_offset);
 }
 
-static void OPND(struct either_t *value, bool newline)
+static void function_epilogue(void)
 {
-	if (value->tag == VALUE)
-	{
-		if (value->value->kind.tag == KOOPA_RVT_INTEGER
-		    && value->value->kind.data.integer.value == 0)
-			EMIT(newline ? "x0\n" : "x0, ");
-		else
-		{
-			if (--g_reg_t_idx < 7)
-				EMIT(newline ? "t%d\n" : "t%d, ", g_reg_t_idx);
-			else
-				EMIT(newline ? "a%d\n" : "a%d, ",
-				     g_reg_t_idx - 7);
-		}
-	}
-	else if (value->tag == INDEX)
-	{
-		if (value->index < 7)
-			EMIT(newline ? "t%d\n" : "t%d, ", value->index);
-		else
-			EMIT(newline ? "a%d\n" : "a%d, ", value->index - 7);
-	}
-	else
-		assert(false /* missing value */);
+	EMIT("  addi sp, sp, %d\n", -m_stack_offset);
+	// reset stack offset
+	m_stack_offset = 0;
+}
+
+/* kind generators */
+static void codegen_kind_load(koopa_raw_load_t *load)
+{
+	struct variant_t src = codegen_value(load->src);
+
+	OPER("lw", 1);
+	OPND(&src, true);
+}
+
+static void codegen_kind_store(koopa_raw_store_t *store)
+{
+	struct variant_t value = codegen_value(store->value);
+	struct variant_t dest = codegen_value(store->dest);
+
+	OPER("sw", 0);
+	OPND(&value, false);
+	OPND(&dest, true);
 }
 
 static void codegen_kind_return(koopa_raw_return_t *ret)
 {
-	struct either_t value = codegen_value(ret->value);
+	struct variant_t value = codegen_value(ret->value);
 
 	EMIT("  mv a0, ");
 	OPND(&value, true);
+	function_epilogue();
 	EMIT("  ret\n");
 }
 
 static void codegen_kind_binary(koopa_raw_binary_t *binary)
 {
-	/* evaluate rhs first, since `g_reg_t_idx` works just like a stack */
-	struct either_t rhs = codegen_value(binary->rhs);
-	struct either_t lhs = codegen_value(binary->lhs);
+	/* evaluate rhs first, since `m_reg_t_idx` works just like a stack */
+	struct variant_t rhs = codegen_value(binary->rhs);
+	struct variant_t lhs = codegen_value(binary->lhs);
 
 	switch (binary->op)
 	{
@@ -238,25 +275,73 @@ static void codegen_kind_integer(koopa_raw_integer_t *integer)
 {
 	if (integer->value != 0)
 	{
-		if (g_reg_t_idx < 7)
-			EMIT("  li t%d, %d\n", g_reg_t_idx++, integer->value);
+		if (m_reg_t_idx < 7)
+			EMIT("  li t%d, %d\n", m_reg_t_idx++, integer->value);
 		else
-			EMIT("  li a%d, %d\n", g_reg_t_idx++ - 7,
+			EMIT("  li a%d, %d\n", m_reg_t_idx++ - 7,
 			     integer->value);
 	}
 }
 
-/* weird design... i wonder if there's a better way to backtrack.
- * currently if we're not using `struct either_t` we'll have to `ht_find()`
+/* visitors */
+static void codegen_slice(const koopa_raw_slice_t *slice)
+{
+	switch (slice->kind)
+	{
+	case KOOPA_RSIK_UNKNOWN:
+		assert(false /* unknown slice type */);
+		break;
+	case KOOPA_RSIK_TYPE:
+		for (uint32_t i = 0; i < slice->len; ++i)
+			codegen_type(slice->buffer[i]);
+		break;
+	case KOOPA_RSIK_FUNCTION:
+		for (uint32_t i = 0; i < slice->len; ++i)
+			codegen_function(slice->buffer[i]);
+		break;
+	case KOOPA_RSIK_BASIC_BLOCK:
+		for (uint32_t i = 0; i < slice->len; ++i)
+			codegen_basic_block(slice->buffer[i]);
+		break;
+	case KOOPA_RSIK_VALUE:
+		for (uint32_t i = 0; i < slice->len; ++i)
+		{
+			koopa_raw_value_t value = slice->buffer[i];
+			if (value->ty->tag == KOOPA_RTT_INT32)
+				// register t_n should start from index of
+				// current value that has non-unit type
+				m_reg_t_idx = ++m_inst_idx;
+			codegen_value(slice->buffer[i]);
+		}
+		break;
+	}
+}
+
+static void codegen_slice_ref(const koopa_raw_slice_t *slice)
+{
+}
+
+/* weird return type... i wonder if there's a better way to backtrack.
+ * currently if we're not using `struct variant_t` we'll have to `ht_find()`
  * twice (first in this function, then in `OPND()`.) */
-static struct either_t codegen_value(koopa_raw_value_t raw)
+static struct variant_t codegen_value(koopa_raw_value_t raw)
 {
 	if (!raw)
-		return (struct either_t) { .tag = NONE, };
+		return (struct variant_t) { .tag = NIL, };
 
-	uint32_t *value_it = ht_find(g_ht_insts, raw);
+	if (raw->kind.tag == KOOPA_RVT_ALLOC)
+	{
+		uint32_t *offset_it = ht_find(m_ht_offsets, raw);
+		assert(offset_it);
+		return (struct variant_t) {
+			.tag = OFFSET,
+			.offset = *offset_it,
+		};
+	}
+
+	uint32_t *value_it = ht_find(m_ht_insts, raw);
 	if (value_it)
-		return (struct either_t) { .tag = INDEX, .index = *value_it, };
+		return (struct variant_t) { .tag = INDEX, .index = *value_it, };
 
 	codegen_type(raw->ty);
 
@@ -280,18 +365,16 @@ static struct either_t codegen_value(koopa_raw_value_t raw)
 	case KOOPA_RVT_AGGREGATE:
 		codegen_slice(&raw->kind.data.aggregate.elems);
 		break;
-	case KOOPA_RVT_ALLOC:
-		assert(false /* todo */);
-		break;
 	case KOOPA_RVT_GLOBAL_ALLOC:
 		codegen_value(raw->kind.data.global_alloc.init);
 		break;
 	case KOOPA_RVT_LOAD:
-		codegen_value(raw->kind.data.load.src);
+		codegen_kind_load(&raw->kind.data.load);
+		ht_upsert(m_ht_insts, raw, m_inst_idx);
 		break;
 	case KOOPA_RVT_STORE:
-		codegen_value(raw->kind.data.store.value);
-		codegen_value(raw->kind.data.store.dest);
+		codegen_kind_store(&raw->kind.data.store);
+		ht_upsert(m_ht_insts, raw, m_inst_idx);
 		break;
 	case KOOPA_RVT_GET_PTR:
 		codegen_value(raw->kind.data.get_ptr.src);
@@ -303,7 +386,7 @@ static struct either_t codegen_value(koopa_raw_value_t raw)
 		break;
 	case KOOPA_RVT_BINARY:
 		codegen_kind_binary(&raw->kind.data.binary);
-		ht_upsert(g_ht_insts, raw, g_inst_idx);
+		ht_upsert(m_ht_insts, raw, m_inst_idx);
 		break;
 	case KOOPA_RVT_BRANCH:
 		codegen_value(raw->kind.data.branch.cond);
@@ -322,11 +405,13 @@ static struct either_t codegen_value(koopa_raw_value_t raw)
 		break;
 	case KOOPA_RVT_RETURN:
 		codegen_kind_return(&raw->kind.data.ret);
-		ht_upsert(g_ht_insts, raw, g_inst_idx);
+		ht_upsert(m_ht_insts, raw, m_inst_idx);
+		break;
+	default:
 		break;
 	}
 
-	return (struct either_t) { .tag = VALUE, .value = raw };
+	return (struct variant_t) { .tag = VALUE, .value = raw };
 }
 
 static void codegen_basic_block(koopa_raw_basic_block_t raw)
@@ -335,7 +420,7 @@ static void codegen_basic_block(koopa_raw_basic_block_t raw)
 		return;
 
 	codegen_slice(&raw->params);
-	// codegen_slice_ref(&raw->used_by);
+	codegen_slice_ref(&raw->used_by);
 	codegen_slice(&raw->insts);
 }
 
@@ -348,6 +433,8 @@ static void codegen_function(koopa_raw_function_t raw)
 		EMIT("  .globl main\n");
 	EMIT("%s:\n", raw->name + 1);
 
+	// TODO: really ugly, should be refactored
+	function_prologue(raw);
 	codegen_type(raw->ty);
 	codegen_slice(&raw->params);
 	codegen_slice(&raw->bbs);
@@ -381,8 +468,9 @@ void codegen(const koopa_raw_program_t *program, FILE *output)
 {
 	assert(output);
 
-	g_output = output;
-	g_ht_insts = ht_ptru32_new();
+	m_output = output;
+	m_ht_insts = ht_ptru32_new();
+	m_ht_offsets = ht_ptru32_new();
 
 #if 0
 	koopa_raw_slice_t *values = &program->values;
@@ -393,5 +481,6 @@ void codegen(const koopa_raw_program_t *program, FILE *output)
 	EMIT("  .text\n");
 	codegen_slice(funcs);
 
-	ht_ptru32_delete(g_ht_insts);
+	ht_ptru32_delete(m_ht_offsets);
+	ht_ptru32_delete(m_ht_insts);
 }

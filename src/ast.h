@@ -5,8 +5,9 @@
 #ifndef _AST_H_
 #define _AST_H_
 
-#include "node.h"
 #include <stdarg.h>
+
+#include "node.h"
 
 struct node_t *_ast_term_int(enum ast_kind_e kind, int value);
 struct node_t *_ast_term_string(enum ast_kind_e kind, const char *value);

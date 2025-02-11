@@ -13,7 +13,6 @@ bool error = false;
 int yycolumn = 1;
 #define YY_USER_ACTION						 \
 	do {							 \
-		yylloc.first_line = yylloc.last_line = yylineno; \
 		yylloc.first_column = yycolumn;			 \
 		yylloc.last_column = yycolumn + yyleng - 1;	 \
 		yycolumn += yyleng;				 \
@@ -23,6 +22,7 @@ int yycolumn = 1;
 WS		[ \t]+
 NEWLINE		"\n"|"\r\n"
 
+/* comments */
 Comment		"//".*
 BlockComment	"/*".*"*/"
 
@@ -60,29 +60,22 @@ Modulo		"%"
 LAnd		"&&"
 LOr		"||"
 
-/* bitwise operators */
-And		"&"
-Or		"|"
+/* SHIFTOP */
+LShift		"<<"
+RShift		">>"
 
-/* shift operators */
-LLShift		"<<"
-LRShift		">>"
-ARShift		">>>"
-
-FIXED		[0-9]+"."[0-9]+
 SEMI		";"
 COMMA		","
-ASSIGNOP	"="
-DOT		"."
-TYPE		"int"|"fixed"
+ASSIGN		"="
+TYPE		"int"|"void"
 LP		"("
 RP		")"
 LB		"["
 RB		"]"
 LC		"{"
 RC		"}"
-STRUCT		"struct"
 RETURN		"return"
+CONST		"const"
 IF		"if"
 ELSE		"else"
 WHILE		"while"
@@ -116,8 +109,7 @@ WHILE		"while"
 
 {SEMI}		{ yylval.s = strdup(yytext); return SEMI; }
 {COMMA}		{ yylval.s = strdup(yytext); return COMMA; }
-{ASSIGNOP}	{ yylval.s = strdup(yytext); return ASSIGNOP; }
-{DOT}		{ yylval.s = strdup(yytext); return DOT; }
+{ASSIGN}	{ yylval.s = strdup(yytext); return ASSIGN; }
 {LP}		{ yylval.s = strdup(yytext); return LP; }
 {RP}		{ yylval.s = strdup(yytext); return RP; }
 {LB}		{ yylval.s = strdup(yytext); return LB; }
@@ -126,8 +118,8 @@ WHILE		"while"
 {RC}		{ yylval.s = strdup(yytext); return RC; }
 
 {TYPE}		{ yylval.s = strdup(yytext); return TYPE; }
-{STRUCT}	{ yylval.s = strdup(yytext); return STRUCT; }
 {RETURN}	{ yylval.s = strdup(yytext); return RETURN; }
+{CONST}		{ yylval.s = strdup(yytext); return CONST; }
 {IF}		{ yylval.s = strdup(yytext); return IF; }
 {ELSE}		{ yylval.s = strdup(yytext); return ELSE; }
 {WHILE}		{ yylval.s = strdup(yytext); return WHILE; }
@@ -138,16 +130,12 @@ WHILE		"while"
 
 {Identifier}	{ yylval.s = strdup(yytext); return IDENT; }
 
-.		{ fprintf(stderr, "Error type A at Line %d: Mysterious characte"
-		  "r \"%s\"\n", yylineno, yytext); error = true; }
+.		{ fprintf(stderr, "Error type A at %d:%d: Mysterious character "
+		  "\"%s\"\n", yylineno, yycolumn, yytext); error = true; }
 
 %%
+/* TODO: support shift operators */
 #if 0
-{LLShift}	{ yylval.s = strdup(yytext); return SHOP; }
-{LRShift}	{ yylval.s = strdup(yytext); return SHOP; }
-{ARShift}	{ yylval.s = strdup(yytext); return SHOP; }
-
-{Or}		{ yylval.s = strdup(yytext); return OR; }
-{And}		{ yylval.s = strdup(yytext); return AND; }
-{Xor}		{ yylval.s = strdup(yytext); return XOR; }
+{LShift}	{ yylval.s = strdup(yytext); return SHIFTOP; }
+{RShift}	{ yylval.s = strdup(yytext); return SHIFTOP; }
 #endif

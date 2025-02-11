@@ -133,7 +133,7 @@ void _debug_type(koopa_raw_type_t raw)
 		return;
 	}
 
-	LOG("{ /* Type at %p */ ", raw);
+	LOG("{ /* Type %p */ ", raw);
 
 	LOG("tag: '%s', ", TYPE_TAG_S[raw->tag]);
 
@@ -144,18 +144,15 @@ void _debug_type(koopa_raw_type_t raw)
 	case KOOPA_RTT_UNIT:
 		break;
 	case KOOPA_RTT_ARRAY:
-		LOG("array: ");
-		_debug_type(raw->data.array.base);
+		LOG("array: %p, ", raw->data.array.base);
 		break;
 	case KOOPA_RTT_POINTER:
-		LOG("pointer: ");
-		_debug_type(raw->data.pointer.base);
+		LOG("pointer: %p, ", raw->data.pointer.base);
 		break;
 	case KOOPA_RTT_FUNCTION:
 		LOG("params: ");
 		debug_slice(&raw->data.function.params);
-		LOG("function: ");
-		_debug_type(raw->data.function.ret);
+		LOG("function: %p, ", raw->data.function.ret);
 		break;	
 	}
 	LOG("}, ");
@@ -171,7 +168,7 @@ void _debug_function(koopa_raw_function_t raw)
 		return;
 	}
 
-	LOG("{ /* Function at %p */ ", raw);
+	LOG("{ /* Function %p */ ", raw);
 
 	LOG("ty: ");
 	_debug_type(raw->ty);
@@ -192,7 +189,7 @@ void _debug_basic_block(koopa_raw_basic_block_t raw)
 		return;
 	}
 
-	LOG("{ /* Basic block at %p */ ", raw);
+	LOG("{ /* Basic block %p */ ", raw);
 
 	LOG("name: '%s', ", raw->name);
 	LOG("params: ");
@@ -205,6 +202,8 @@ void _debug_basic_block(koopa_raw_basic_block_t raw)
 	LOG("}, ");
 }
 
+/* TODO: use this regex to replace with shallow visits
+ * %s/LOG("\(.*\): ");\n\t\t_debug_.*(\(.*\));/LOG("\1: %p", \2); */
 void _debug_value(koopa_raw_value_t raw)
 {
 	if (!raw)
@@ -213,7 +212,7 @@ void _debug_value(koopa_raw_value_t raw)
 		return;
 	}
 
-	LOG("{ /* Value at %p */ ", raw);
+	LOG("{ /* Value %p */ ", raw);
 
 	LOG("ty: ");
 	_debug_type(raw->ty);
@@ -245,68 +244,51 @@ void _debug_value(koopa_raw_value_t raw)
 			raw->kind.data.block_arg_ref.index);
 		break;
 	case KOOPA_RVT_ALLOC:
-		assert(false /* todo */);
 		break;
 	case KOOPA_RVT_GLOBAL_ALLOC:
-		LOG("init: ");
-		_debug_value(raw->kind.data.global_alloc.init);
+		LOG("init: %p, ", raw->kind.data.global_alloc.init);
 		break;
 	case KOOPA_RVT_LOAD:
-		LOG("src: ");
-		_debug_value(raw->kind.data.load.src);
+		LOG("src: %p, ", raw->kind.data.load.src);
 		break;
 	case KOOPA_RVT_STORE:
-		LOG("value: ");
-		_debug_value(raw->kind.data.store.value);
-		LOG("dest: ");
-		_debug_value(raw->kind.data.store.dest);
+		LOG("value: %p, ", raw->kind.data.store.value);
+		LOG("dest: %p, ", raw->kind.data.store.dest);
 		break;
 	case KOOPA_RVT_GET_PTR:
-		LOG("src: ");
-		_debug_value(raw->kind.data.get_ptr.src);
-		LOG("index: ");
-		_debug_value(raw->kind.data.get_ptr.index);
+		LOG("src: %p, ", raw->kind.data.get_ptr.src);
+		LOG("index: %p, ", raw->kind.data.get_ptr.index);
 		break;
 	case KOOPA_RVT_GET_ELEM_PTR:
-		LOG("src: ");
-		_debug_value(raw->kind.data.get_elem_ptr.src);
-		LOG("index: ");
-		_debug_value(raw->kind.data.get_elem_ptr.index);
+		LOG("src: %p, ", raw->kind.data.get_elem_ptr.src);
+		LOG("index: %p, ", raw->kind.data.get_elem_ptr.index);
 		break;
 	case KOOPA_RVT_BINARY:
 		LOG("op: '%s', ", BINARY_OP_S[raw->kind.data.binary.op]);
-		LOG("lhs: ");
-		_debug_value(raw->kind.data.binary.lhs);
-		LOG("rhs: ");
-		_debug_value(raw->kind.data.binary.rhs);
+		LOG("lhs: %p, ", raw->kind.data.binary.lhs);
+		LOG("rhs: %p, ", raw->kind.data.binary.rhs);
 		break;
 	case KOOPA_RVT_BRANCH:
-		LOG("cond: ");
-		_debug_value(raw->kind.data.branch.cond);
-		LOG("true_bb: ");
-		_debug_basic_block(raw->kind.data.branch.true_bb);
-		LOG("false_bb: ");
-		_debug_basic_block(raw->kind.data.branch.false_bb);
+		LOG("cond: %p, ", raw->kind.data.branch.cond);
+		LOG("true_bb: %p, ", raw->kind.data.branch.true_bb);
+		LOG("false_bb: %p, ", raw->kind.data.branch.false_bb);
 		LOG("true_args: ");
 		debug_slice(&raw->kind.data.branch.true_args);
 		LOG("false_args: ");
 		debug_slice(&raw->kind.data.branch.false_args);
 		break;
 	case KOOPA_RVT_JUMP:
-		LOG("target: ");
-		_debug_basic_block(raw->kind.data.jump.target);
+		LOG("target: %p, ", raw->kind.data.jump.target);
 		LOG("args: ");
 		debug_slice(&raw->kind.data.jump.args);
 		break;
 	case KOOPA_RVT_CALL:
-		LOG("callee: ");
-		_debug_function(raw->kind.data.call.callee);
+		LOG("callee: %p, ", raw->kind.data.call.callee);
 		LOG("args: ");
 		debug_slice(&raw->kind.data.call.args);
 		break;
 	case KOOPA_RVT_RETURN:
-		LOG("value: ");
-		_debug_value(raw->kind.data.ret.value);
+		LOG("value: %p, ", raw->kind.data.ret.value);
 		break;
 	}
 	LOG("}, ");
