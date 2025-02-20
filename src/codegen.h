@@ -1,3 +1,8 @@
+/**
+ * codegen.h
+ * Code generation module.
+ */
+
 #ifndef _CODEGEN_H_
 #define _CODEGEN_H_
 

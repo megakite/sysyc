@@ -1,3 +1,8 @@
+/**
+ * main.c
+ * The SysY compiler.
+ */
+
 #include <assert.h>
 #include <setjmp.h>
 #include <stdbool.h>
@@ -5,15 +10,14 @@
 #include <string.h>
 
 #include "ast.h"
-#include "semantic.h"
-#include "ir.h"
 #include "codegen.h"
-
-#include "koopaext.h"
 #include "debug.h"
-#include "exception.h"
-
+#include "globals.h"
+#include "ir.h"
 #include "koopa.h"
+#include "koopaext.h"
+#include "macros.h"
+#include "semantic.h"
 
 /* yacc variables */
 extern FILE *yyin;
@@ -82,7 +86,7 @@ int main(int argc, char **argv)
 
 	/* generate memory IR */
 	printf("======= Generating memory IR...\n");
-	bump_t bump = bump_new();
+	bump_t bump = bump_new(128 KiB);
 	koopa_raw_program_set_allocator(bump);
 	koopa_raw_program_t raw = ir(comp_unit);
 
@@ -100,8 +104,11 @@ int main(int argc, char **argv)
 	if (strcmp(mode, "-riscv") == 0)
 	{
 		/* dump IR */
-		printf("======= Dumping text-form Koopa IR...\n");
-		koopa_dump_to_file(program, middle);
+		if (strcmp(middle, "-o") != 0)
+		{
+			printf("======= Dumping text-form Koopa IR...\n");
+			koopa_dump_to_file(program, middle);
+		}
 
 		/* generate assembly */
 		FILE *f = fopen(output, "w");

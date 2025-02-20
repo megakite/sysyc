@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include "bump.h"
+#include "macros.h"
 
 #define ALIGNMENT alignof(max_align_t)
 #define ALIGNED(ptr) ((ptr) & -ALIGNMENT)
@@ -22,16 +23,15 @@ struct _bump_t {
 };
 
 /* exported functions */
-bump_t bump_new(void)
+bump_t bump_new(size_t size)
 {
-	size_t size = BUMP_SIZE;
 	struct _bump_t *new = aligned_alloc(sysconf(_SC_PAGESIZE), size);
-	new->ptr = new->buf + BUMP_SIZE;
+	new->ptr = new->buf + size;
 
 	return new;
 }
 
-inline void bump_delete(bump_t bump)
+void bump_delete(bump_t bump)
 {
 	free(bump);
 }

@@ -4,6 +4,7 @@
 #include <assert.h>
 
 #include "ast.h"
+#include "macros.h"
 
 struct node_t *ast_nterm(enum ast_kind_e kind, int lineno, int count, ...)
 {
@@ -67,7 +68,7 @@ static void lambda_print(void *ptr, int depth)
 	switch (data->kind)
 	{
 	case AST_UNKNOWN:
-		assert(false /* unreachable */);
+		unreachable();
 		break;
 	case AST_INT_CONST:
 		printf("%s : %d\n", AST_KIND_S[data->kind], data->value.i);
@@ -90,7 +91,7 @@ static void lambda_print(void *ptr, int depth)
 	}
 }
 
-inline void ast_print(struct node_t *node)
+void ast_print(struct node_t *node)
 {
-	node_traverse_pre_depth(node, lambda_print, 0);
+	node_traverse_depth(node, lambda_print, 0);
 }

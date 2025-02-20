@@ -10,13 +10,14 @@
 
 /* state variables */
 bool error = false;
-int yycolumn = 1;
+#if 0
 #define YY_USER_ACTION						 \
 	do {							 \
 		yylloc.first_column = yycolumn;			 \
 		yylloc.last_column = yycolumn + yyleng - 1;	 \
 		yycolumn += yyleng;				 \
 	} while (0);
+#endif
 %}
 
 WS		[ \t]+
@@ -85,7 +86,7 @@ WHILE		"while"
 {Comment}
 {BlockComment}
 {WS}
-{NEWLINE}	yycolumn = 1;
+{NEWLINE}	{ /* yycolumn = 1; */ }
 
 {Greater}	{ yylval.s = strdup(yytext); return RELOP; }
 {Less}		{ yylval.s = strdup(yytext); return RELOP; }
@@ -130,8 +131,8 @@ WHILE		"while"
 
 {Identifier}	{ yylval.s = strdup(yytext); return IDENT; }
 
-.		{ fprintf(stderr, "Error type A at %d:%d: Mysterious character "
-		  "\"%s\"\n", yylineno, yycolumn, yytext); error = true; }
+.		{ fprintf(stderr, "Syntax error at line %d: mysterious characte"
+		  "r `%s`\n", yylineno, yytext); error = true; }
 
 %%
 /* TODO: support shift operators */

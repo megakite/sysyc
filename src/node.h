@@ -1,3 +1,8 @@
+/**
+ * node.h
+ * Definition and implementation of the node system.
+ */
+
 #ifndef _NODE_H_
 #define _NODE_H_
 
@@ -132,13 +137,12 @@ struct node_t {
 
 struct node_t *node_new(struct node_data_t data, int capacity);
 
-/**
- * Add a child to given root.
- * @return The possibly reallocated root, since we are using flexible members.
+/* Add a child to given root.
+ * @return Possibly reallocated root.
  */
 struct node_t *node_add_child(struct node_t *root, struct node_t *node);
 void node_traverse_post(struct node_t *node, void (*fn)(void *ptr));
-void node_traverse_pre_depth(struct node_t *node,
+void node_traverse_depth(struct node_t *node,
 			     void (*fn)(void *ptr, int depth), int depth);
 void node_delete(struct node_t *node);
 

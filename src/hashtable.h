@@ -1,46 +1,69 @@
+/**
+ * hashtable.h
+ * Hash table implementation.
+ */
+
 #ifndef _HASHTABLE_H_
 #define _HASHTABLE_H_
 
 #include <stdint.h>
 
 #include "semantic.h"
+#include "symbols.h"
+#include "view.h"
 
 #define HASHTABLE_BITS 0xff
 #define HASHTABLE_SIZE 256
 
 /* HashTable<Ptr, UInt32> */
-typedef struct _ht_ptru32_t *ht_ptru32_t;
+typedef struct _htable_ptru32_t *htable_ptru32_t;
 
-ht_ptru32_t ht_ptru32_new(void);
-void ht_ptru32_delete(ht_ptru32_t table);
+htable_ptru32_t htable_ptru32_new(void);
+void htable_ptru32_delete(htable_ptru32_t table);
 
-uint32_t *ht_ptru32_find(ht_ptru32_t table, void *key);
-void ht_ptru32_upsert(ht_ptru32_t table, void *key, uint32_t value);
-void ht_ptru32_iterate(ht_ptru32_t table, void (*fn)(void *, uint32_t));
+uint32_t *htable_ptru32_lookup(const htable_ptru32_t table, void *key);
+uint32_t *htable_ptru32_insert(htable_ptru32_t table, void *key,
+			       uint32_t value);
+void htable_ptru32_iterate(htable_ptru32_t table,
+			   void (*fn)(void **, uint32_t *));
 
 /* HashTable<String, Symbol> */
-typedef struct _ht_strsym_t *ht_strsym_t;
+typedef struct _htable_strsym_t *htable_strsym_t;
 
-ht_strsym_t ht_strsym_new(void);
-void ht_strsym_delete(ht_strsym_t table);
+htable_strsym_t htable_strsym_new(void);
+void htable_strsym_delete(htable_strsym_t table);
 
-struct symbol_t *ht_strsym_find(ht_strsym_t table, char *key);
-void ht_strsym_upsert(ht_strsym_t table, char *key, struct symbol_t value);
-void ht_strsym_iterate(ht_strsym_t table, void (*fn)(char *, struct symbol_t));
+struct view_t htable_strsym_lookup(const htable_strsym_t table, char *key);
+struct symbol_t *htable_strsym_insert(htable_strsym_t table, char *key,
+				      struct symbol_t value);
+void htable_strsym_iterate(htable_strsym_t table,
+			   void (*fn)(char **, struct symbol_t *));
 
-#define ht_find(table, key) _Generic((table),	\
-		ht_strsym_t: ht_strsym_find,	\
-		ht_ptru32_t: ht_ptru32_find	\
+/* HashTable<...Args, Ptr> */
+typedef struct _htable_argptr_t *htable_argptr_t;
+
+htable_argptr_t htable_argptr_new(void);
+void htable_argptr_delete(htable_argptr_t table);
+
+struct view_t htable_argptr_lookup(const htable_argptr_t table, char *key);
+struct symbol_t *htable_argptr_insert(htable_argptr_t table, char *key,
+				      struct symbol_t value);
+void htable_argptr_iterate(htable_argptr_t table,
+			   void (*fn)(char **, struct symbol_t *));
+
+#define htable_lookup(table, key) _Generic((table),	\
+		htable_strsym_t: htable_strsym_lookup,	\
+		htable_ptru32_t: htable_ptru32_lookup	\
 	)(table, key)
 
-#define ht_upsert(table, key, value) _Generic((table),	\
-		ht_strsym_t: ht_strsym_upsert,		\
-		ht_ptru32_t: ht_ptru32_upsert		\
+#define htable_insert(table, key, value) _Generic((table),	\
+		htable_strsym_t: htable_strsym_insert,		\
+		htable_ptru32_t: htable_ptru32_insert		\
 	)(table, key, value)
 
-#define ht_iterate(table, fn) _Generic((table),	\
-		ht_strsym_t: ht_strsym_iterate,	\
-		ht_ptru32_t: ht_ptru32_iterate	\
+#define htable_iterate(table, fn) _Generic((table),	\
+		htable_strsym_t: htable_strsym_iterate,	\
+		htable_ptru32_t: htable_ptru32_iterate	\
 	)(table, fn)
 
 #endif//_HASHTABLE_H_

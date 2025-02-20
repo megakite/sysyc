@@ -5,20 +5,20 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "semantic.h"
+#include "globals.h"
 #include "hashtable.h"
-#include "exception.h"
-
-/* exported symbol table */
-ht_strsym_t g_symbols;
+#include "semantic.h"
+#include "symbols.h"
+#include "macros.h"
 
 /* state variables */
-bool m_constexpr;
+static bool m_constexpr;
+static const struct node_t *m_this_node;
 
 /* thrower */
-static void semantic_error(const char *fmt, ...)
+static void error(const char *fmt, ...)
 {
-	fprintf(stderr, "Error type C: ");
+	fprintf(stderr, "Line %d: ", m_this_node->data.lineno);
 
 	va_list args;
 	va_start(args, fmt);
@@ -30,10 +30,14 @@ static void semantic_error(const char *fmt, ...)
 	longjmp(exception_env, 3);
 }
 
-/* constructors */
-static inline struct symbol_t symbol_constant(int32_t value)
+/* ctor.s */
+static struct symbol_t symbol_constant(int32_t value)
 {
 	struct symbol_t symbol = {
+		.meta = {
+			.level = symbols_level(g_symbols),
+			.scope = symbols_scope(g_symbols),
+		},
 		.tag = CONSTANT,
 		.constant = {
 			.value = value,
@@ -43,9 +47,13 @@ static inline struct symbol_t symbol_constant(int32_t value)
 	return symbol;
 }
 
-static inline struct symbol_t symbol_variable(void)
+static struct symbol_t symbol_variable(void)
 {
 	struct symbol_t symbol = {
+		.meta = {
+			.level = symbols_level(g_symbols),
+			.scope = symbols_scope(g_symbols),
+		},
 		.tag = VARIABLE,
 		.variable = {
 			.raw = NULL,
@@ -54,9 +62,13 @@ static inline struct symbol_t symbol_variable(void)
 	return symbol;
 }
 
-static inline struct symbol_t symbol_function(enum function_type_e type)
+static struct symbol_t symbol_function(enum function_type_e type)
 {
 	struct symbol_t symbol = {
+		.meta = {
+			.level = symbols_level(g_symbols),
+			.scope = symbols_scope(g_symbols),
+		},
 		.tag = CONSTANT,
 		.function = {
 			.type = type,
@@ -67,129 +79,154 @@ static inline struct symbol_t symbol_function(enum function_type_e type)
 }
 
 /* accessor decl.s */
-static void semantic_CompUnit(struct node_t *node);
-static void semantic_FuncDef(struct node_t *node);
-static enum function_type_e semantic_FuncType(struct node_t *node);
-static void semantic_Block(struct node_t *node);
-static void semantic_Stmt(struct node_t *node);
-static int32_t semantic_Number(struct node_t *node);
+static void CompUnit(const struct node_t *node);
+static void FuncDef(const struct node_t *node);
+static enum function_type_e FuncType(const struct node_t *node);
+static void Block(const struct node_t *node);
+static void Stmt(const struct node_t *node);
+static int32_t Number(const struct node_t *node);
 
-static int32_t semantic_Exp(struct node_t *node);
-static int32_t semantic_UnaryExp(struct node_t *node);
-static int32_t semantic_PrimaryExp(struct node_t *node);
+static int32_t Exp(const struct node_t *node);
+static int32_t UnaryExp(const struct node_t *node);
+static int32_t PrimaryExp(const struct node_t *node);
 
-static void semantic_Decl(struct node_t *node);
-static void semantic_ConstDecl(struct node_t *node);
-static void semantic_BType(struct node_t *node);
-static void semantic_ConstDef(struct node_t *node);
-static int32_t semantic_ConstInitVal(struct node_t *node);
-static void semantic_VarDecl(struct node_t *node);
-static void semantic_VarDef(struct node_t *node);
+static void Decl(const struct node_t *node);
+static void ConstDecl(const struct node_t *node);
+static void BType(const struct node_t *node);
+static void ConstDef(const struct node_t *node);
+static int32_t ConstInitVal(const struct node_t *node);
+static void VarDecl(const struct node_t *node);
+static void VarDef(const struct node_t *node);
 #if 0
 /* will be evaluated later in IR generation phase */
-static int32_t semantic_InitVal(struct node_t *node);
+static int32_t InitVal(const struct node_t *node);
 #endif
-static void semantic_BlockItem(struct node_t *node);
-static char *semantic_LVal(struct node_t *node);
-static int32_t semantic_ConstExp(struct node_t *node);
-static void semantic_ConstDefList(struct node_t *node);
-static void semantic_VarDefList(struct node_t *node);
-static void semantic_BlockItemList(struct node_t *node);
+static void BlockItem(const struct node_t *node);
+static char *LVal(const struct node_t *node);
+static int32_t ConstExp(const struct node_t *node);
+static void ConstDefList(const struct node_t *node);
+static void VarDefList(const struct node_t *node);
+static void BlockItemList(const struct node_t *node);
 
 /* accessor defn.s */
-void semantic_CompUnit(struct node_t *node)
+static void CompUnit(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_CompUnit);
+	m_this_node = node;
 
-	semantic_FuncDef(node->children[0]);
+	symbols_indent(g_symbols);
+	FuncDef(node->children[0]);
+	symbols_leave(g_symbols);
 }
 
-void semantic_FuncDef(struct node_t *node)
+static void FuncDef(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_FuncDef);
+	m_this_node = node;
 
 	char *name = node->children[1]->data.value.s;
-	if (ht_find(g_symbols, name))
-		semantic_error("Redefinition of function `%s`", name);
 
-	enum function_type_e type = semantic_FuncType(node->children[0]);
-	ht_upsert(g_symbols, name, symbol_function(type));
+	struct view_t view = symbols_lookup(g_symbols, name);
+	for (struct symbol_t *it = view.begin; it; it = view.next(&view))
+		if (symbols_here(g_symbols, it))
+			error("Redefinition of function: `%s`", name);
 
-	semantic_Block(node->children[2]);
+	enum function_type_e type = FuncType(node->children[0]);
+	symbols_add(g_symbols, name, symbol_function(type));
+
+	Block(node->children[2]);
 }
 
-static enum function_type_e semantic_FuncType(struct node_t *node)
+static enum function_type_e FuncType(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_FuncType);
+	m_this_node = node;
 
 	char *type = node->children[0]->data.value.s;
 
 	if (strcmp(type, "void") == 0)
-		assert(false /* todo */);
+		todo();
 	if (strcmp(type, "int") == 0)
 		return INT;
 
-	assert(false /* unknown FuncType */);
+	panic("unsupported FuncType");
 }
 
-static void semantic_Block(struct node_t *node)
+static void Block(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_Block);
+	m_this_node = node;
 
-	semantic_BlockItemList(node->children[0]);
+	symbols_indent(g_symbols);
+	BlockItemList(node->children[0]);
+	symbols_leave(g_symbols);
 }
 
-void semantic_Stmt(struct node_t *node)
+static void Stmt(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_Stmt);
+	m_this_node = node;
 
 	switch (node->children[0]->data.kind)
 	{
+	case AST_SEMI:
+		/* empty Stmt, do nothing */
+		break;
+	case AST_Exp:
+		Exp(node->children[0]);
+		break;
 	case AST_LVal:
 		{
-		char *ident = semantic_LVal(node->children[0]);
-		struct symbol_t *symbol = ht_find(g_symbols, ident);
+		char *ident = LVal(node->children[0]);
+
+		struct symbol_t *symbol = symbols_get(g_symbols, ident);
 		if (!symbol)
-			semantic_error("Undefined symbol: `%s`", ident);
+			error("Undefined symbol: `%s`", ident);
 		if (symbol->tag != VARIABLE)
-			semantic_error("Assignee must be a variable: `%s`",
-				       ident);
+			error("Assignee must be a variable: `%s`", ident);
 		}
 		break;
+	case AST_Block:
+		Block(node->children[0]);
+		break;
 	case AST_RETURN:
-		semantic_Exp(node->children[1]);
+		/* RETURN [Exp] SEMI */
+		if (node->size == 2)
+			Exp(node->children[1]);
 		break;
 	default:
-		assert(false /* todo */);
+		todo();
 	}
 }
 
-static int32_t semantic_Number(struct node_t *node)
+static int32_t Number(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_Number);
+	m_this_node = node;
 
 	return node->children[0]->data.value.i;
 }
 
-static int32_t semantic_Exp(struct node_t *node)
+static int32_t Exp(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_Exp);
+	m_this_node = node;
 
 	/* unary expression, propagate */
 	if (node->size == 1)
-		return semantic_UnaryExp(node->children[0]);
+		return UnaryExp(node->children[0]);
 
 	/* otherwise, binary expression */
 	char *op_token = node->children[1]->data.value.s;
-	uint32_t lhs = semantic_Exp(node->children[0]);
-	uint32_t rhs = semantic_Exp(node->children[2]);
+	uint32_t lhs = Exp(node->children[0]);
+	uint32_t rhs = Exp(node->children[2]);
 
 	/* logical operators are kinda naughty */
 	switch (node->children[1]->data.kind)
@@ -203,7 +240,7 @@ static int32_t semantic_Exp(struct node_t *node)
 			return lhs != rhs;
 		if (strcmp(op_token, "==") == 0)
 			return lhs == rhs;
-		assert(false /* unsupported EQOP */);
+		panic("unsupported EQOP");
 	case AST_RELOP:
 		if (strcmp(op_token, ">") == 0)
 			return lhs > rhs;
@@ -213,13 +250,13 @@ static int32_t semantic_Exp(struct node_t *node)
 			return lhs >= rhs;
 		if (strcmp(op_token, "<=") == 0)
 			return lhs <= rhs;
-		assert(false /* unsupported RELOP */);
+		panic("unsupported RELOP");
 	case AST_ADDOP:
 		if (strcmp(op_token, "+") == 0)
 			return lhs + rhs;
 		if (strcmp(op_token, "-") == 0)
 			return lhs - rhs;
-		assert(false /* unsupported ADDOP */);
+		panic("unsupported ADDOP");
 	case AST_MULOP:
 		if (strcmp(op_token, "*") == 0)
 			return lhs * rhs;
@@ -227,26 +264,25 @@ static int32_t semantic_Exp(struct node_t *node)
 			return lhs / rhs;
 		if (strcmp(op_token, "%") == 0)
 			return lhs % rhs;
-		assert(false /* unsupported MULOP */);
+		panic("unsupported MULOP");
 	default:
-		assert(false /* todo */);
+		todo();
 	}
-
-	assert(false /* unreachable */);
 }
 
-static int32_t semantic_UnaryExp(struct node_t *node)
+static int32_t UnaryExp(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_UnaryExp);
+	m_this_node = node;
 
 	/* sole primary expression (fixed point) */
 	if (node->size == 1)
-		return semantic_PrimaryExp(node->children[0]);
+		return PrimaryExp(node->children[0]);
 
 	/* otherwise, continguous unary expression */
 	char op_token = node->children[0]->data.value.s[0];
-	uint32_t operand = semantic_UnaryExp(node->children[1]);
+	uint32_t operand = UnaryExp(node->children[1]);
 
 	switch (op_token)
 	{
@@ -257,25 +293,27 @@ static int32_t semantic_UnaryExp(struct node_t *node)
 	case '!':
 		return !operand;
 	default:
-		assert(false /* wrong operator */);
+		panic("unsupported unary operator");
 	}
 }
 
-static int32_t semantic_PrimaryExp(struct node_t *node)
+static int32_t PrimaryExp(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_PrimaryExp);
+	m_this_node = node;
 
 	if (node->children[0]->data.kind == AST_Exp)
-		return semantic_Exp(node->children[0]);
+		return Exp(node->children[0]);
 	if (node->children[0]->data.kind == AST_Number)
-		return semantic_Number(node->children[0]);
+		return Number(node->children[0]);
 	if (node->children[0]->data.kind == AST_LVal)
 	{
-		char *ident = semantic_LVal(node->children[0]);
-		struct symbol_t *symbol = ht_find(g_symbols, ident);
+		char *ident = LVal(node->children[0]);
+
+		struct symbol_t *symbol = symbols_get(g_symbols, ident);
 		if (!symbol)
-			semantic_error("Undefined symbol: `%s`", ident);
+			error("Undefined symbol: `%s`", ident);
 		
 		switch (symbol->tag)
 		{
@@ -283,153 +321,172 @@ static int32_t semantic_PrimaryExp(struct node_t *node)
 			return symbol->constant.value;
 		case VARIABLE:
 			if (m_constexpr)
-				semantic_error("Constants must be calculated at"
-					       " compile time, while `%s` is a "
-					       "variable", ident);
+				error("Constants must be evaluated at compile t"
+				      "ime, while `%s` is a variable", ident);
 			return 0;
 		case FUNCTION:
-			semantic_error("Function as variable is not supported",
-				       ident);
+			error("Function as variable is not supported", ident);
 		}
 	}
 
-	assert(false /* unreachable */);
+	unreachable();
 }
 
-static void semantic_Decl(struct node_t *node)
+static void Decl(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_Decl);
+	m_this_node = node;
 
+	symbols_indent(g_symbols);
 	if (node->children[0]->data.kind == AST_ConstDecl)
-		return semantic_ConstDecl(node->children[0]);
+		ConstDecl(node->children[0]);
 	if (node->children[0]->data.kind == AST_VarDecl)
-		return semantic_VarDecl(node->children[0]);
+		VarDecl(node->children[0]);
+	// no need to `leave()` here, we'll clean it up when we exit this block
 }
 
-static void semantic_ConstDecl(struct node_t *node)
+static void ConstDecl(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_ConstDecl);
+	m_this_node = node;
 
 	m_constexpr = true;
 
-	semantic_BType(node->children[0]);
-	semantic_ConstDefList(node->children[1]);
+	BType(node->children[0]);
+	ConstDefList(node->children[1]);
 
 	m_constexpr = false;
 }
 
-static void semantic_BType(struct node_t *node)
+static void BType(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_BType);
+	m_this_node = node;
 
 	if (strcmp(node->children[0]->data.value.s, "int") != 0)
-		semantic_error("Type of variable must be `int`");
+		error("Type of variable must be `int`");
 }
 
-static void semantic_ConstDef(struct node_t *node)
+static void ConstDef(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_ConstDef);
+	m_this_node = node;
 
 	char *ident = node->children[0]->data.value.s;
-	if (ht_find(g_symbols, ident))
-		semantic_error("Redefinition of constant: `%s`", ident);
 
-	int32_t value = semantic_ConstInitVal(node->children[1]);
-	ht_upsert(g_symbols, ident, symbol_constant(value));
+	struct view_t view = symbols_lookup(g_symbols, ident);
+	for (struct symbol_t *it = view.begin; it; it = view.next(&view))
+		if (symbols_here(g_symbols, it))
+			error("Redefinition of constant: `%s`", ident);
+
+	int32_t value = ConstInitVal(node->children[1]);
+	symbols_add(g_symbols, ident, symbol_constant(value));
 }
 
-static int32_t semantic_ConstInitVal(struct node_t *node)
+static int32_t ConstInitVal(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_ConstInitVal);
+	m_this_node = node;
 
-	return semantic_ConstExp(node->children[0]);
+	return ConstExp(node->children[0]);
 }
 
-static void semantic_VarDecl(struct node_t *node)
+static void VarDecl(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_VarDecl);
+	m_this_node = node;
 
-	semantic_BType(node->children[0]);
-	semantic_VarDefList(node->children[1]);
+	BType(node->children[0]);
+	VarDefList(node->children[1]);
 }
 
-static void semantic_VarDef(struct node_t *node)
+static void VarDef(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_VarDef);
+	m_this_node = node;
 
 	char *ident = node->children[0]->data.value.s;
-	if (ht_find(g_symbols, ident))
-		semantic_error("Redefinition of variable: `%s`", ident);
+
+	struct view_t view = symbols_lookup(g_symbols, ident);
+	for (struct symbol_t *it = view.begin; it; it = view.next(&view))
+		if (symbols_here(g_symbols, it))
+			error("Redefinition of variable: `%s`", ident);
 
 	/* always treat as uninitialized, since `InitVal` can only be evaluated
 	 * in IR phase because `InitVal` is an `Exp` */
-	ht_upsert(g_symbols, ident, symbol_variable());
+	symbols_add(g_symbols, ident, symbol_variable());
 }
 
-static void semantic_BlockItem(struct node_t *node)
+static void BlockItem(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_BlockItem);
+	m_this_node = node;
 
 	if (node->children[0]->data.kind == AST_Decl)
-		return semantic_Decl(node->children[0]);
+		Decl(node->children[0]);
 	if (node->children[0]->data.kind == AST_Stmt)
-		return semantic_Stmt(node->children[0]);
+		Stmt(node->children[0]);
 }
 
-static char *semantic_LVal(struct node_t *node)
+static char *LVal(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_LVal);
+	m_this_node = node;
 
 	return node->children[0]->data.value.s;
 }
 
-static int32_t semantic_ConstExp(struct node_t *node)
+static int32_t ConstExp(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_ConstExp);
+	m_this_node = node;
 
-	return semantic_Exp(node->children[0]);
+	return Exp(node->children[0]);
 }
 
-static void semantic_ConstDefList(struct node_t *node)
+static void ConstDefList(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_ConstDefList);
+	m_this_node = node;
 	
 	for (int i = node->size - 1; i >= 0; --i)
-		semantic_ConstDef(node->children[i]);
+		ConstDef(node->children[i]);
 }
 
-static void semantic_VarDefList(struct node_t *node)
+static void VarDefList(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_VarDefList);
+	m_this_node = node;
 
 	for (int i = node->size - 1; i >= 0; --i)
-		semantic_VarDef(node->children[i]);
+		VarDef(node->children[i]);
 }
 
-static void semantic_BlockItemList(struct node_t *node)
+static void BlockItemList(const struct node_t *node)
 {
 	assert(node);
 	assert(node->data.kind == AST_BlockItemList);
+	m_this_node = node;
 
 	for (int i = node->size - 1; i >= 0; --i)
-		semantic_BlockItem(node->children[i]);
+		BlockItem(node->children[i]);
 }
 
-void semantic(struct node_t *comp_unit)
+void semantic(const struct node_t *comp_unit)
 {
-	g_symbols = ht_strsym_new();
+	g_symbols = symbols_new();
 
-	semantic_CompUnit(comp_unit);
+	CompUnit(comp_unit);
 }

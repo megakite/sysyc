@@ -11,7 +11,7 @@ FB_EXT := .cpp
 endif
 
 # Flags
-CFLAGS := -Wall -std=c11 -D_POSIX_C_SOURCE=200809L -fsanitize=address
+CFLAGS := -Wall -Wextra -std=c11 -D_POSIX_C_SOURCE=200809L -fsanitize=address
 CXXFLAGS := -Wall -Wno-register -std=c++17
 FFLAGS :=
 BFLAGS := -d
