@@ -53,17 +53,20 @@ void htable_argptr_iterate(htable_argptr_t table,
 
 #define htable_lookup(table, key) _Generic((table),	\
 		htable_strsym_t: htable_strsym_lookup,	\
-		htable_ptru32_t: htable_ptru32_lookup	\
+		htable_ptru32_t: htable_ptru32_lookup,	\
+		htable_argptr_t: htable_argptr_lookup	\
 	)(table, key)
 
 #define htable_insert(table, key, value) _Generic((table),	\
 		htable_strsym_t: htable_strsym_insert,		\
-		htable_ptru32_t: htable_ptru32_insert		\
+		htable_ptru32_t: htable_ptru32_insert,		\
+		htable_argptr_t: htable_argptr_insert		\
 	)(table, key, value)
 
 #define htable_iterate(table, fn) _Generic((table),	\
 		htable_strsym_t: htable_strsym_iterate,	\
-		htable_ptru32_t: htable_ptru32_iterate	\
+		htable_ptru32_t: htable_ptru32_iterate,	\
+		htable_argptr_t: htable_argptr_iterate	\
 	)(table, fn)
 
 #endif//_HASHTABLE_H_

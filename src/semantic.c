@@ -27,7 +27,7 @@ static void error(const char *fmt, ...)
 
 	fprintf(stderr, "\n");
 
-	longjmp(exception_env, 3);
+	longjmp(g_exception_env, 3);
 }
 
 /* ctor.s */
@@ -111,8 +111,7 @@ static void BlockItemList(const struct node_t *node);
 /* accessor defn.s */
 static void CompUnit(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_CompUnit);
+	assert(node && node->data.kind == AST_CompUnit);
 	m_this_node = node;
 
 	symbols_indent(g_symbols);
@@ -122,8 +121,7 @@ static void CompUnit(const struct node_t *node)
 
 static void FuncDef(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_FuncDef);
+	assert(node && node->data.kind == AST_FuncDef);
 	m_this_node = node;
 
 	char *name = node->children[1]->data.value.s;
@@ -141,8 +139,7 @@ static void FuncDef(const struct node_t *node)
 
 static enum function_type_e FuncType(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_FuncType);
+	assert(node && node->data.kind == AST_FuncType);
 	m_this_node = node;
 
 	char *type = node->children[0]->data.value.s;
@@ -157,8 +154,7 @@ static enum function_type_e FuncType(const struct node_t *node)
 
 static void Block(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_Block);
+	assert(node && node->data.kind == AST_Block);
 	m_this_node = node;
 
 	symbols_indent(g_symbols);
@@ -168,8 +164,7 @@ static void Block(const struct node_t *node)
 
 static void Stmt(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_Stmt);
+	assert(node && node->data.kind == AST_Stmt);
 	m_this_node = node;
 
 	switch (node->children[0]->data.kind)
@@ -199,6 +194,13 @@ static void Stmt(const struct node_t *node)
 		if (node->size == 2)
 			Exp(node->children[1]);
 		break;
+	case AST_IF:
+		/* IF (LP) Exp (RP) Stmt [ELSE Stmt] */
+		Exp(node->children[1]);
+		Stmt(node->children[2]);
+		if (node->size == 4)
+			Stmt(node->children[3]);
+		break;
 	default:
 		todo();
 	}
@@ -206,8 +208,7 @@ static void Stmt(const struct node_t *node)
 
 static int32_t Number(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_Number);
+	assert(node && node->data.kind == AST_Number);
 	m_this_node = node;
 
 	return node->children[0]->data.value.i;
@@ -215,8 +216,7 @@ static int32_t Number(const struct node_t *node)
 
 static int32_t Exp(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_Exp);
+	assert(node && node->data.kind == AST_Exp);
 	m_this_node = node;
 
 	/* unary expression, propagate */
@@ -251,6 +251,11 @@ static int32_t Exp(const struct node_t *node)
 		if (strcmp(op_token, "<=") == 0)
 			return lhs <= rhs;
 		panic("unsupported RELOP");
+	case AST_SHOP:
+		if (strcmp(op_token, ">>") == 0)
+			return lhs >> rhs;
+		if (strcmp(op_token, "<<") == 0)
+			return lhs << rhs;
 	case AST_ADDOP:
 		if (strcmp(op_token, "+") == 0)
 			return lhs + rhs;
@@ -272,8 +277,7 @@ static int32_t Exp(const struct node_t *node)
 
 static int32_t UnaryExp(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_UnaryExp);
+	assert(node && node->data.kind == AST_UnaryExp);
 	m_this_node = node;
 
 	/* sole primary expression (fixed point) */
@@ -299,8 +303,7 @@ static int32_t UnaryExp(const struct node_t *node)
 
 static int32_t PrimaryExp(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_PrimaryExp);
+	assert(node && node->data.kind == AST_PrimaryExp);
 	m_this_node = node;
 
 	if (node->children[0]->data.kind == AST_Exp)
@@ -334,8 +337,7 @@ static int32_t PrimaryExp(const struct node_t *node)
 
 static void Decl(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_Decl);
+	assert(node && node->data.kind == AST_Decl);
 	m_this_node = node;
 
 	symbols_indent(g_symbols);
@@ -348,8 +350,7 @@ static void Decl(const struct node_t *node)
 
 static void ConstDecl(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_ConstDecl);
+	assert(node && node->data.kind == AST_ConstDecl);
 	m_this_node = node;
 
 	m_constexpr = true;
@@ -362,8 +363,7 @@ static void ConstDecl(const struct node_t *node)
 
 static void BType(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_BType);
+	assert(node && node->data.kind == AST_BType);
 	m_this_node = node;
 
 	if (strcmp(node->children[0]->data.value.s, "int") != 0)
@@ -372,8 +372,7 @@ static void BType(const struct node_t *node)
 
 static void ConstDef(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_ConstDef);
+	assert(node && node->data.kind == AST_ConstDef);
 	m_this_node = node;
 
 	char *ident = node->children[0]->data.value.s;
@@ -389,8 +388,7 @@ static void ConstDef(const struct node_t *node)
 
 static int32_t ConstInitVal(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_ConstInitVal);
+	assert(node && node->data.kind == AST_ConstInitVal);
 	m_this_node = node;
 
 	return ConstExp(node->children[0]);
@@ -398,8 +396,7 @@ static int32_t ConstInitVal(const struct node_t *node)
 
 static void VarDecl(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_VarDecl);
+	assert(node && node->data.kind == AST_VarDecl);
 	m_this_node = node;
 
 	BType(node->children[0]);
@@ -408,8 +405,7 @@ static void VarDecl(const struct node_t *node)
 
 static void VarDef(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_VarDef);
+	assert(node && node->data.kind == AST_VarDef);
 	m_this_node = node;
 
 	char *ident = node->children[0]->data.value.s;
@@ -426,8 +422,7 @@ static void VarDef(const struct node_t *node)
 
 static void BlockItem(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_BlockItem);
+	assert(node && node->data.kind == AST_BlockItem);
 	m_this_node = node;
 
 	if (node->children[0]->data.kind == AST_Decl)
@@ -438,8 +433,7 @@ static void BlockItem(const struct node_t *node)
 
 static char *LVal(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_LVal);
+	assert(node && node->data.kind == AST_LVal);
 	m_this_node = node;
 
 	return node->children[0]->data.value.s;
@@ -447,8 +441,7 @@ static char *LVal(const struct node_t *node)
 
 static int32_t ConstExp(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_ConstExp);
+	assert(node && node->data.kind == AST_ConstExp);
 	m_this_node = node;
 
 	return Exp(node->children[0]);
@@ -456,8 +449,7 @@ static int32_t ConstExp(const struct node_t *node)
 
 static void ConstDefList(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_ConstDefList);
+	assert(node && node->data.kind == AST_ConstDefList);
 	m_this_node = node;
 	
 	for (int i = node->size - 1; i >= 0; --i)
@@ -466,8 +458,7 @@ static void ConstDefList(const struct node_t *node)
 
 static void VarDefList(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_VarDefList);
+	assert(node && node->data.kind == AST_VarDefList);
 	m_this_node = node;
 
 	for (int i = node->size - 1; i >= 0; --i)
@@ -476,8 +467,7 @@ static void VarDefList(const struct node_t *node)
 
 static void BlockItemList(const struct node_t *node)
 {
-	assert(node);
-	assert(node->data.kind == AST_BlockItemList);
+	assert(node && node->data.kind == AST_BlockItemList);
 	m_this_node = node;
 
 	for (int i = node->size - 1; i >= 0; --i)

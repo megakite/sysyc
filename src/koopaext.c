@@ -10,9 +10,6 @@
 #include "macros.h"
 #include "globals.h"
 
-/* pool of `koopa_raw_type_t`s */
-static htable_argptr_t m_raw_types;
-
 /* raw program memory management */
 void koopa_raw_program_set_allocator(bump_t bump)
 {
@@ -36,11 +33,18 @@ void slice_append(koopa_raw_slice_t *slice, void *item)
 		 * well, perhaps all of those _raw_ things aren't meant to be
 		 * manipulated by human, you know, they're all const-qualified.
 		 * ah, nevermind. */
-		++slice->len;
 		slice->buffer = bump_realloc(g_bump, slice->buffer, 
-					     sizeof(void *) * slice->len);
+					     sizeof(void *) * ++slice->len);
 		slice->buffer[slice->len - 1] = item;
 	}
+}
+
+void *slice_back(koopa_raw_slice_t *slice)
+{
+	if (slice->len == 0)
+		return NULL;
+	
+	return slice->buffer[slice->len - 1];
 }
 
 koopa_raw_slice_t slice_new(uint32_t len, koopa_raw_slice_item_kind_t kind)
@@ -61,14 +65,84 @@ void slice_iter(koopa_raw_slice_t *slice, void (*fn)(void *))
 		fn(slice->buffer[i]);
 }
 
+/* name constructors */
+char *koopa_raw_name_global(char *ident)
+{
+	if (!ident)
+		return NULL;
+
+	char name[1 + IDENT_MAX];
+	snprintf(name, 1 + IDENT_MAX, "@%s", ident);
+	name[IDENT_MAX] = '\0';
+
+	return bump_strdup(g_bump, name);
+}
+
+char *koopa_raw_name_local(char *ident)
+{
+	if (!ident)
+		return NULL;
+
+	char name[1 + IDENT_MAX];
+	snprintf(name, 1 + IDENT_MAX, "%%%s", ident);
+	name[IDENT_MAX] = '\0';
+
+	return bump_strdup(g_bump, name);
+}
+
+/* common objects */
+static koopa_raw_type_kind_t KOOPA_RAW_TYPE_KIND_INT32 = {
+	.tag = KOOPA_RTT_INT32,
+};
+
+static koopa_raw_type_kind_t KOOPA_RAW_TYPE_KIND_UNIT = {
+	.tag = KOOPA_RTT_UNIT,
+};
+
 /* IR builders */
+koopa_raw_type_t koopa_raw_type_int32(void)
+{
+	return &KOOPA_RAW_TYPE_KIND_INT32;
+}
+
+koopa_raw_type_t koopa_raw_type_unit(void)
+{
+	return &KOOPA_RAW_TYPE_KIND_UNIT;
+}
+
+koopa_raw_type_t koopa_raw_type_array(koopa_raw_type_t base, size_t len)
+{
+	koopa_raw_type_kind_t *type = bump_malloc(g_bump, sizeof(*type));
+	type->tag = KOOPA_RTT_ARRAY;
+	type->data.array.base = base;
+	type->data.array.len = len;
+
+	return type;
+}
+
+koopa_raw_type_t koopa_raw_type_pointer(koopa_raw_type_t base)
+{
+	koopa_raw_type_kind_t *type = bump_malloc(g_bump, sizeof(*type));
+	type->tag = KOOPA_RTT_POINTER;
+	type->data.pointer.base = base;
+
+	return type;
+}
+
+koopa_raw_type_t koopa_raw_type_function(koopa_raw_type_t ret)
+{
+	koopa_raw_type_kind_t *type = bump_malloc(g_bump, sizeof(*type));
+	type->tag = KOOPA_RTT_FUNCTION;
+	type->data.function.params = slice_new(0, KOOPA_RSIK_TYPE);
+	type->data.function.ret = ret;
+
+	return type;
+}
+
 koopa_raw_value_t koopa_raw_integer(int32_t value)
 {
-	koopa_raw_type_kind_t *ret_ty = bump_malloc(g_bump, sizeof(*ret_ty));
-	ret_ty->tag = KOOPA_RTT_INT32;
-
 	koopa_raw_value_data_t *ret = bump_malloc(g_bump, sizeof(*ret));
-	ret->ty = ret_ty;
+	ret->ty = koopa_raw_type_int32();
 	ret->name = NULL;
 	ret->used_by = slice_new(0, KOOPA_RSIK_VALUE);
 	ret->kind = (koopa_raw_value_kind_t) {
@@ -104,12 +178,8 @@ koopa_raw_value_t koopa_raw_global_alloc(char *name, koopa_raw_value_t init)
 
 koopa_raw_value_t koopa_raw_alloc(char *name, koopa_raw_type_t base)
 {
-	koopa_raw_type_kind_t *ret_ty = bump_malloc(g_bump, sizeof(*ret_ty));
-	ret_ty->tag = KOOPA_RTT_POINTER;
-	ret_ty->data.pointer.base = base;
-
 	koopa_raw_value_data_t *ret = bump_malloc(g_bump, sizeof(*ret));
-	ret->ty = ret_ty;
+	ret->ty = koopa_raw_type_pointer(base);
 	ret->name = name;
 	ret->used_by = slice_new(0, KOOPA_RSIK_VALUE);
 	ret->kind = (koopa_raw_value_kind_t) {
@@ -121,11 +191,8 @@ koopa_raw_value_t koopa_raw_alloc(char *name, koopa_raw_type_t base)
 
 koopa_raw_value_t koopa_raw_load(koopa_raw_value_t src)
 {
-	koopa_raw_type_kind_t *ret_ty = bump_malloc(g_bump, sizeof(*ret_ty));
-	ret_ty->tag = KOOPA_RTT_INT32;
-
 	koopa_raw_value_data_t *ret = bump_malloc(g_bump, sizeof(*ret));
-	ret->ty = ret_ty;
+	ret->ty = koopa_raw_type_int32();
 	ret->name = NULL;
 	ret->used_by = slice_new(0, KOOPA_RSIK_VALUE);
 	ret->kind = (koopa_raw_value_kind_t) {
@@ -141,11 +208,8 @@ koopa_raw_value_t koopa_raw_load(koopa_raw_value_t src)
 koopa_raw_value_t koopa_raw_store(koopa_raw_value_t value,
 				  koopa_raw_value_t dest)
 {
-	koopa_raw_type_kind_t *ret_ty = bump_malloc(g_bump, sizeof(*ret_ty));
-	ret_ty->tag = KOOPA_RTT_UNIT;
-
 	koopa_raw_value_data_t *ret = bump_malloc(g_bump, sizeof(*ret));
-	ret->ty = ret_ty;
+	ret->ty = koopa_raw_type_unit();
 	ret->name = NULL;
 	ret->used_by = slice_new(0, KOOPA_RSIK_VALUE);
 	ret->kind = (koopa_raw_value_kind_t) {
@@ -177,11 +241,8 @@ koopa_raw_value_t koopa_raw_binary(koopa_raw_binary_op_t op,
 				   koopa_raw_value_t lhs,
 				   koopa_raw_value_t rhs)
 {
-	koopa_raw_type_kind_t *ret_ty = bump_malloc(g_bump, sizeof(*ret_ty));
-	ret_ty->tag = KOOPA_RTT_INT32;
-
 	koopa_raw_value_data_t *ret = bump_malloc(g_bump, sizeof(*ret));
-	ret->ty = ret_ty;
+	ret->ty = koopa_raw_type_int32();
 	ret->name = NULL;
 	ret->used_by = slice_new(0, KOOPA_RSIK_VALUE);
 	ret->kind = (koopa_raw_value_kind_t) {
@@ -197,36 +258,59 @@ koopa_raw_value_t koopa_raw_binary(koopa_raw_binary_op_t op,
 
 koopa_raw_value_t koopa_raw_branch(koopa_raw_value_t cond,
 				   koopa_raw_basic_block_t true_bb,
-				   koopa_raw_basic_block_t false_bb,
-				   koopa_raw_slice_t true_args,
-				   koopa_raw_slice_t false_args)
+				   koopa_raw_basic_block_t false_bb)
 {
-	(void) cond, (void) true_bb, (void) false_bb, (void) true_args,
-		(void) false_args;
-	todo();
+	koopa_raw_value_data_t *ret = bump_malloc(g_bump, sizeof(*ret));
+	ret->ty = koopa_raw_type_unit();
+	ret->name = NULL;
+	ret->used_by = slice_new(0, KOOPA_RSIK_VALUE);
+	ret->kind = (koopa_raw_value_kind_t) {
+		.tag = KOOPA_RVT_BRANCH,
+		.data.branch = {
+			.cond = cond,
+			.true_bb = true_bb,
+			.false_bb = false_bb,
+			.true_args = slice_new(0, KOOPA_RSIK_VALUE),
+			.false_args = slice_new(0, KOOPA_RSIK_VALUE),
+		},
+	};
+
+	slice_append(&ret->kind.data.branch.cond->used_by, ret);
+	slice_append(&ret->kind.data.branch.true_bb->used_by, ret);
+	slice_append(&ret->kind.data.branch.false_bb->used_by, ret);
+
+	return ret;
 }
 
-koopa_raw_value_t koopa_raw_jump(koopa_raw_basic_block_t target,
-				 koopa_raw_slice_t args)
+koopa_raw_value_t koopa_raw_jump(koopa_raw_basic_block_t target)
 {
-	(void) target, (void) args;
-	todo();
+	koopa_raw_value_data_t *ret = bump_malloc(g_bump, sizeof(*ret));
+	ret->ty = koopa_raw_type_unit();
+	ret->name = NULL;
+	ret->used_by = slice_new(0, KOOPA_RSIK_VALUE);
+	ret->kind = (koopa_raw_value_kind_t) {
+		.tag = KOOPA_RVT_JUMP,
+		.data.jump = {
+			.target = target,
+			.args = slice_new(0, KOOPA_RSIK_VALUE),
+		},
+	};
+
+	slice_append(&ret->kind.data.jump.target->used_by, ret);
+
+	return ret;
 }
 
-koopa_raw_value_t koopa_raw_call(koopa_raw_function_t callee,
-				 koopa_raw_slice_t args)
+koopa_raw_value_t koopa_raw_call(koopa_raw_function_t callee)
 {
-	(void) callee, (void) args;
+	(void) callee;
 	todo();
 }
 
 koopa_raw_value_t koopa_raw_return(koopa_raw_value_t value)
 {
-	koopa_raw_type_kind_t *ret_ty = bump_malloc(g_bump, sizeof(*ret_ty));
-	ret_ty->tag = KOOPA_RTT_UNIT;
-
 	koopa_raw_value_data_t *ret = bump_malloc(g_bump, sizeof(*ret));
-	ret->ty = ret_ty;
+	ret->ty = koopa_raw_type_unit();
 	ret->name = NULL;
 	ret->used_by = slice_new(0, KOOPA_RSIK_VALUE);
 	ret->kind = (koopa_raw_value_kind_t) {
@@ -235,6 +319,28 @@ koopa_raw_value_t koopa_raw_return(koopa_raw_value_t value)
 	};
 
 	slice_append(&ret->kind.data.ret.value->used_by, ret);
+
+	return ret;
+}
+
+koopa_raw_basic_block_t koopa_raw_basic_block(char *name)
+{
+	koopa_raw_basic_block_data_t *ret = bump_malloc(g_bump, sizeof(*ret));
+	ret->name = koopa_raw_name_local(name);
+	ret->params = slice_new(0, KOOPA_RSIK_VALUE);
+	ret->used_by = slice_new(0, KOOPA_RSIK_VALUE);
+	ret->insts = slice_new(0, KOOPA_RSIK_VALUE);
+
+	return ret;
+}
+
+koopa_raw_function_t koopa_raw_function(koopa_raw_type_t ty, char *name)
+{
+	koopa_raw_function_data_t *ret = bump_malloc(g_bump, sizeof(*ret));
+	ret->ty = ty;
+	ret->name = koopa_raw_name_global(name);
+	ret->params = slice_new(0, KOOPA_RSIK_VALUE);
+	ret->bbs = slice_new(0, KOOPA_RSIK_BASIC_BLOCK);
 
 	return ret;
 }

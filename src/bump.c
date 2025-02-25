@@ -10,7 +10,7 @@
 #include "macros.h"
 
 #define ALIGNMENT alignof(max_align_t)
-#define ALIGNED(ptr) ((ptr) & -ALIGNMENT)
+#define aligned(ptr) ((void *)((uintptr_t)(ptr) & -ALIGNMENT))
 
 /* opaque type definition */
 struct _bump_t {
@@ -44,8 +44,8 @@ void *bump_malloc(bump_t bump, size_t size)
 {
 	assert(bump);
 
-	void *alloc = (void *)ALIGNED((uintptr_t)bump->ptr - size);
-	bump->ptr = (void *)((uintptr_t)alloc - ALIGNMENT);
+	void *alloc = aligned((char *)bump->ptr - size);
+	bump->ptr = (char *)alloc - ALIGNMENT;
 	assert((uintptr_t)bump->ptr > (uintptr_t)bump->buf);
 
 	*(size_t *)bump->ptr = size;
@@ -69,7 +69,7 @@ void *bump_realloc(bump_t bump, void *ptr, size_t new_size)
 	assert(ptr);
 
 	void *alloc = bump_malloc(bump, new_size);
-	memcpy(alloc, ptr, *(size_t *)((uintptr_t)alloc - ALIGNMENT));
+	memcpy(alloc, ptr, *(size_t *)((char *)alloc - ALIGNMENT));
 
 	return alloc;
 }

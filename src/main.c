@@ -79,7 +79,7 @@ int main(int argc, char **argv)
 #endif
 
 	/* semantic analysis */
-	if (setjmp(exception_env) == 0)
+	if (setjmp(g_exception_env) == 0)
 		semantic(comp_unit);
 	else
 		goto cleanup_comp_unit;

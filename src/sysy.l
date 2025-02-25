@@ -61,7 +61,7 @@ Modulo		"%"
 LAnd		"&&"
 LOr		"||"
 
-/* SHIFTOP */
+/* SHOP */
 LShift		"<<"
 RShift		">>"
 
@@ -95,6 +95,9 @@ WHILE		"while"
 
 {Eq}		{ yylval.s = strdup(yytext); return EQOP; }
 {NotEq}		{ yylval.s = strdup(yytext); return EQOP; }
+
+{LShift}	{ yylval.s = strdup(yytext); return SHOP; }
+{RShift}	{ yylval.s = strdup(yytext); return SHOP; }
 
 {Plus}		{ yylval.s = strdup(yytext); return ADDOP; }
 {Minus}		{ yylval.s = strdup(yytext); return ADDOP; }
@@ -133,10 +136,3 @@ WHILE		"while"
 
 .		{ fprintf(stderr, "Syntax error at line %d: mysterious characte"
 		  "r `%s`\n", yylineno, yytext); error = true; }
-
-%%
-/* TODO: support shift operators */
-#if 0
-{LShift}	{ yylval.s = strdup(yytext); return SHIFTOP; }
-{RShift}	{ yylval.s = strdup(yytext); return SHIFTOP; }
-#endif

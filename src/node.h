@@ -9,7 +9,8 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
-#define IDENT_MAX 32
+// ima be lazy here, obliging what the standard says
+#define IDENT_MAX 64
 
 enum ast_kind_e {
 	AST_UNKNOWN = 0,
@@ -20,12 +21,12 @@ enum ast_kind_e {
 	AST_ASSIGN,
 	AST_RELOP,
 	AST_EQOP,
+	AST_SHOP,
 	AST_ADDOP,
 	AST_UNARYOP,
 	AST_MULOP,
 	AST_LAND,
 	AST_LOR,
-	AST_SHIFTOP,
 	AST_TYPE,
 	AST_LP,
 	AST_RP,
@@ -61,58 +62,6 @@ enum ast_kind_e {
 	AST_ConstDefList,
 	AST_VarDefList,
 	AST_BlockItemList,
-};
-
-static const char *AST_KIND_S[] = {
-	"UNKNOWN",
-	"INT_CONST",
-	"IDENT",
-	"SEMI",
-	"COMMA",
-	"ASSIGN",
-	"RELOP",
-	"EQOP",
-	"ADDOP",
-	"UNARYOP",
-	"MULOP",
-	"LAND",
-	"LOR",
-	"SHIFTOP",
-	"TYPE",
-	"LP",
-	"RP",
-	"LB",
-	"RB",
-	"LC",
-	"RC",
-	"RETURN",
-	"IF",
-	"ELSE",
-	"WHILE",
-	"END_OF_TERM",
-	"CompUnit",
-	"FuncDef",
-	"FuncType",
-	"Block",
-	"Stmt",
-	"Number",
-	"Exp",
-	"PrimaryExp",
-	"UnaryExp",
-	"Decl",
-	"ConstDecl",
-	"BType",
-	"ConstDef",
-	"ConstInitVal",
-	"VarDecl",
-	"VarDef",
-	"InitVal",
-	"BlockItem",
-	"LVal",
-	"ConstExp",
-	"ConstDefList",
-	"VarDefList",
-	"BlockItemList",
 };
 
 union ast_value_u {

@@ -41,7 +41,7 @@ static void vfree(int count, ...)
 /* tokens */
 %token <i> INT_CONST
 %token <s> IDENT SEMI TYPE LP RP LC RC RETURN
-	   RELOP EQOP ADDOP UNARYOP MULOP LAND LOR
+	   RELOP EQOP SHOP ADDOP UNARYOP MULOP LAND LOR
 	   CONST ASSIGN
 	   IF ELSE
 	   WHILE
@@ -59,6 +59,7 @@ static void vfree(int count, ...)
 %left LAND
 %left EQOP
 %left RELOP
+%left SHOP
 %left ADDOP
 %left MULOP
 %right UNARYOP
@@ -122,13 +123,13 @@ BlockItem
 	;
 
 Stmt
-	: SEMI {
-		$$ = ast_nterm(AST_Stmt, yylineno, 1, ast_term(AST_SEMI, $1));
-		free($1);
-	}
-        | LVal ASSIGN Exp SEMI {
+	: LVal ASSIGN Exp SEMI {
 		$$ = ast_nterm(AST_Stmt, yylineno, 2, $1, $3);
 		vfree(2, $2, $4);
+	}
+	| SEMI {
+		$$ = ast_nterm(AST_Stmt, yylineno, 1, ast_term(AST_SEMI, $1));
+		free($1);
 	}
 	| Exp SEMI {
 		$$ = ast_nterm(AST_Stmt, yylineno, 1, $1);
@@ -136,6 +137,16 @@ Stmt
 	}
 	| Block {
 		$$ = ast_nterm(AST_Stmt, yylineno, 1, $1);
+	}
+        | IF LP Exp RP Stmt %prec LOWER_THAN_ELSE {
+		$$ = ast_nterm(AST_Stmt, yylineno, 3,
+			       ast_term(AST_IF, $1), $3, $5);
+		vfree(3, $1, $2, $4);
+	}
+	| IF LP Exp RP Stmt ELSE Stmt {
+		$$ = ast_nterm(AST_Stmt, yylineno, 4,
+			       ast_term(AST_IF, $1), $3, $5, $7);
+		vfree(4, $1, $2, $4, $6);
 	}
 	| RETURN SEMI {
 		$$ = ast_nterm(AST_Stmt, yylineno, 1, ast_term(AST_RETURN, $1));
@@ -174,6 +185,11 @@ Exp
 	| Exp RELOP Exp {
 		$$ = ast_nterm(AST_Exp, yylineno, 3, $1,
 			       ast_term(AST_RELOP, $2), $3);
+		free($2);
+	}
+	| Exp SHOP Exp {
+		$$ = ast_nterm(AST_Exp, yylineno, 3, $1,
+			       ast_term(AST_SHOP, $2), $3);
 		free($2);
 	}
 	| Exp ADDOP Exp {

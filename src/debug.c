@@ -7,8 +7,8 @@
 #include "koopa.h"
 #include "macros.h"
 
-// can't believe that __VA_OPT__ is a C23 feature...
-#define LOG(format, ...) fprintf(stderr, format __VA_OPT__(,) __VA_ARGS__)
+/* can't believe that __VA_OPT__ is a C23 feature... */
+#define clog(format, ...) fprintf(stderr, format __VA_OPT__(,) __VA_ARGS__)
 
 /* enum strings */
 static const char *ITEM_KIND_S[] = {
@@ -72,17 +72,17 @@ static void raw_slice_shallow(const koopa_raw_slice_t *slice)
 {
 	assert(slice);
 
-	LOG("[ /* %d, &%s */ ", slice->len, ITEM_KIND_S[slice->kind]);
+	clog("[ /* %d, &%s */ ", slice->len, ITEM_KIND_S[slice->kind]);
 	for (uint32_t i = 0; i < slice->len; ++i)
-		LOG("%p, ", slice->buffer[i]);
-	LOG("], ");
+		clog("%p, ", slice->buffer[i]);
+	clog("], ");
 }
 
 static void raw_slice(const koopa_raw_slice_t *slice)
 {
 	assert(slice);
 
-	LOG("[ /* %d, %s */ ", slice->len, ITEM_KIND_S[slice->kind]);
+	clog("[ /* %d, %s */ ", slice->len, ITEM_KIND_S[slice->kind]);
 	for (uint32_t i = 0; i < slice->len; ++i)
 	{
 		switch (slice->kind)
@@ -104,25 +104,25 @@ static void raw_slice(const koopa_raw_slice_t *slice)
 			break;
 		}
 	}
-	LOG("], ");
+	clog("], ");
 }
 
 void _debug_raw_program(const koopa_raw_program_t *program)
 {
 	if (!program)
 	{
-		LOG("{}\n");
+		clog("{}\n");
 		return;
 	}
 
-	LOG("{ ");
+	clog("{ ");
 
-	LOG("values: ");
+	clog("values: ");
 	raw_slice(&program->values);
-	LOG("funcs: ");
+	clog("funcs: ");
 	raw_slice(&program->funcs);
 
-	LOG("}\n");
+	clog("}\n");
 }
 
 /* accessor defn.s */
@@ -130,261 +130,261 @@ void _debug_raw_type(koopa_raw_type_t raw)
 {
 	if (!raw)
 	{
-		LOG("{ /* Type */ }, ");
+		clog("{ /* Type */ }, ");
 		return;
 	}
 
-	LOG("{ /* Type %p */ ", raw);
+	clog("{ /* Type %p */ ", raw);
 
-	LOG("tag: '%s', ", TYPE_TAG_S[raw->tag]);
+	clog("tag: '%s', ", TYPE_TAG_S[raw->tag]);
 
-	LOG("data: { ");
+	clog("data: { ");
 	switch (raw->tag)
 	{
 	case KOOPA_RTT_INT32:
 	case KOOPA_RTT_UNIT:
 		break;
 	case KOOPA_RTT_ARRAY:
-		LOG("array: %p, ", raw->data.array.base);
+		clog("array: %p, ", raw->data.array.base);
 		break;
 	case KOOPA_RTT_POINTER:
-		LOG("pointer: %p, ", raw->data.pointer.base);
+		clog("pointer: %p, ", raw->data.pointer.base);
 		break;
 	case KOOPA_RTT_FUNCTION:
-		LOG("params: ");
+		clog("params: ");
 		raw_slice(&raw->data.function.params);
-		LOG("function: %p, ", raw->data.function.ret);
+		clog("function: %p, ", raw->data.function.ret);
 		break;	
 	}
-	LOG("}, ");
+	clog("}, ");
 
-	LOG("}, ");
+	clog("}, ");
 }
 
 void _debug_raw_function(koopa_raw_function_t raw)
 {
 	if (!raw)
 	{
-		LOG("{ /* Function */ }, ");
+		clog("{ /* Function */ }, ");
 		return;
 	}
 
-	LOG("{ /* Function %p */ ", raw);
+	clog("{ /* Function %p */ ", raw);
 
-	LOG("ty: ");
+	clog("ty: ");
 	_debug_raw_type(raw->ty);
-	LOG("name: '%s', ", raw->name);
-	LOG("params: ");
+	clog("name: '%s', ", raw->name);
+	clog("params: ");
 	raw_slice(&raw->params);
-	LOG("bbs: ");
+	clog("bbs: ");
 	raw_slice(&raw->bbs);
 
-	LOG("}, ");
+	clog("}, ");
 }
 
 void _debug_raw_basic_block(koopa_raw_basic_block_t raw)
 {
 	if (!raw)
 	{
-		LOG("{ /* Basic block */ }, ");
+		clog("{ /* Basic block */ }, ");
 		return;
 	}
 
-	LOG("{ /* Basic block %p */ ", raw);
+	clog("{ /* Basic block %p */ ", raw);
 
-	LOG("name: '%s', ", raw->name);
-	LOG("params: ");
+	clog("name: '%s', ", raw->name);
+	clog("params: ");
 	raw_slice(&raw->params);
-	LOG("used_by: ");
+	clog("used_by: ");
 	raw_slice_shallow(&raw->used_by);
-	LOG("insts: ");
+	clog("insts: ");
 	raw_slice(&raw->insts);
 
-	LOG("}, ");
+	clog("}, ");
 }
 
 /* TODO: use this regex to replace with shallow visits
- * %s/LOG("\(.*\): ");\n\t\t_debug_raw_.*(\(.*\));/LOG("\1: %p", \2); */
+ * %s/clog("\(.*\): ");\n\t\t_debug_raw_.*(\(.*\));/LOG("\1: %p", \2); */
 void _debug_raw_value(koopa_raw_value_t raw)
 {
 	if (!raw)
 	{
-		LOG("{ /* Value */ }, ");
+		clog("{ /* Value */ }, ");
 		return;
 	}
 
-	LOG("{ /* Value %p */ ", raw);
+	clog("{ /* Value %p */ ", raw);
 
-	LOG("ty: ");
+	clog("ty: ");
 	_debug_raw_type(raw->ty);
-	LOG("name: '%s', ", raw->name);
-	LOG("used_by: ");
+	clog("name: '%s', ", raw->name);
+	clog("used_by: ");
 	raw_slice_shallow(&raw->used_by);
 
 #if 1
 	/* shallow print */
-	LOG("kind: { ");
-	LOG("tag: '%s', ", VALUE_TAG_S[raw->kind.tag]);
+	clog("kind: { ");
+	clog("tag: '%s', ", VALUE_TAG_S[raw->kind.tag]);
 	switch (raw->kind.tag)
 	{
 	case KOOPA_RVT_INTEGER:
-		LOG("value: %d, ", raw->kind.data.integer.value);
+		clog("value: %d, ", raw->kind.data.integer.value);
 		break;
 	case KOOPA_RVT_ZERO_INIT:
 	case KOOPA_RVT_UNDEF:
 		todo();
 		break;
 	case KOOPA_RVT_AGGREGATE:
-		LOG("elems: ");
+		clog("elems: ");
 		raw_slice(&raw->kind.data.aggregate.elems);
 		break;
 	case KOOPA_RVT_FUNC_ARG_REF:
-		LOG("index: %zu, ",
+		clog("index: %zu, ",
 			raw->kind.data.func_arg_ref.index);
 		break;
 	case KOOPA_RVT_BLOCK_ARG_REF:
-		LOG("index: %zu, ",
+		clog("index: %zu, ",
 			raw->kind.data.block_arg_ref.index);
 		break;
 	case KOOPA_RVT_ALLOC:
 		break;
 	case KOOPA_RVT_GLOBAL_ALLOC:
-		LOG("init: %p, ", raw->kind.data.global_alloc.init);
+		clog("init: %p, ", raw->kind.data.global_alloc.init);
 		break;
 	case KOOPA_RVT_LOAD:
-		LOG("src: %p, ", raw->kind.data.load.src);
+		clog("src: %p, ", raw->kind.data.load.src);
 		break;
 	case KOOPA_RVT_STORE:
-		LOG("value: %p, ", raw->kind.data.store.value);
-		LOG("dest: %p, ", raw->kind.data.store.dest);
+		clog("value: %p, ", raw->kind.data.store.value);
+		clog("dest: %p, ", raw->kind.data.store.dest);
 		break;
 	case KOOPA_RVT_GET_PTR:
-		LOG("src: %p, ", raw->kind.data.get_ptr.src);
-		LOG("index: %p, ", raw->kind.data.get_ptr.index);
+		clog("src: %p, ", raw->kind.data.get_ptr.src);
+		clog("index: %p, ", raw->kind.data.get_ptr.index);
 		break;
 	case KOOPA_RVT_GET_ELEM_PTR:
-		LOG("src: %p, ", raw->kind.data.get_elem_ptr.src);
-		LOG("index: %p, ", raw->kind.data.get_elem_ptr.index);
+		clog("src: %p, ", raw->kind.data.get_elem_ptr.src);
+		clog("index: %p, ", raw->kind.data.get_elem_ptr.index);
 		break;
 	case KOOPA_RVT_BINARY:
-		LOG("op: '%s', ", BINARY_OP_S[raw->kind.data.binary.op]);
-		LOG("lhs: %p, ", raw->kind.data.binary.lhs);
-		LOG("rhs: %p, ", raw->kind.data.binary.rhs);
+		clog("op: '%s', ", BINARY_OP_S[raw->kind.data.binary.op]);
+		clog("lhs: %p, ", raw->kind.data.binary.lhs);
+		clog("rhs: %p, ", raw->kind.data.binary.rhs);
 		break;
 	case KOOPA_RVT_BRANCH:
-		LOG("cond: %p, ", raw->kind.data.branch.cond);
-		LOG("true_bb: %p, ", raw->kind.data.branch.true_bb);
-		LOG("false_bb: %p, ", raw->kind.data.branch.false_bb);
-		LOG("true_args: ");
+		clog("cond: %p, ", raw->kind.data.branch.cond);
+		clog("true_bb: %p, ", raw->kind.data.branch.true_bb);
+		clog("false_bb: %p, ", raw->kind.data.branch.false_bb);
+		clog("true_args: ");
 		raw_slice(&raw->kind.data.branch.true_args);
-		LOG("false_args: ");
+		clog("false_args: ");
 		raw_slice(&raw->kind.data.branch.false_args);
 		break;
 	case KOOPA_RVT_JUMP:
-		LOG("target: %p, ", raw->kind.data.jump.target);
-		LOG("args: ");
+		clog("target: %p, ", raw->kind.data.jump.target);
+		clog("args: ");
 		raw_slice(&raw->kind.data.jump.args);
 		break;
 	case KOOPA_RVT_CALL:
-		LOG("callee: %p, ", raw->kind.data.call.callee);
-		LOG("args: ");
+		clog("callee: %p, ", raw->kind.data.call.callee);
+		clog("args: ");
 		raw_slice(&raw->kind.data.call.args);
 		break;
 	case KOOPA_RVT_RETURN:
-		LOG("value: %p, ", raw->kind.data.ret.value);
+		clog("value: %p, ", raw->kind.data.ret.value);
 		break;
 	}
-	LOG("}, ");
+	clog("}, ");
 
 #else
         /* deep print */
-	LOG("kind: { ");
-	LOG("tag: '%s', ", VALUE_TAG_S[raw->kind.tag]);
+	clog("kind: { ");
+	clog("tag: '%s', ", VALUE_TAG_S[raw->kind.tag]);
 	switch (raw->kind.tag)
 	{
 	case KOOPA_RVT_INTEGER:
-		LOG("value: %d, ", raw->kind.data.integer.value);
+		clog("value: %d, ", raw->kind.data.integer.value);
 		break;
 	case KOOPA_RVT_ZERO_INIT:
 	case KOOPA_RVT_UNDEF:
 		todo();
 		break;
 	case KOOPA_RVT_AGGREGATE:
-		LOG("elems: ");
+		clog("elems: ");
 		raw_slice(&raw->kind.data.aggregate.elems);
 		break;
 	case KOOPA_RVT_FUNC_ARG_REF:
-		LOG("index: %zu, ", raw->kind.data.func_arg_ref.index);
+		clog("index: %zu, ", raw->kind.data.func_arg_ref.index);
 		break;
 	case KOOPA_RVT_BLOCK_ARG_REF:
-		LOG("index: %zu, ", raw->kind.data.block_arg_ref.index);
+		clog("index: %zu, ", raw->kind.data.block_arg_ref.index);
 		break;
 	case KOOPA_RVT_ALLOC:
 		break;
 	case KOOPA_RVT_GLOBAL_ALLOC:
-		LOG("init: ");
+		clog("init: ");
 		_debug_raw_value(raw->kind.data.global_alloc.init);
 		break;
 	case KOOPA_RVT_LOAD:
-		LOG("src: ");
+		clog("src: ");
 		_debug_raw_value(raw->kind.data.load.src);
 		break;
 	case KOOPA_RVT_STORE:
-		LOG("value: ");
+		clog("value: ");
 		_debug_raw_value(raw->kind.data.store.value);
-		LOG("dest: ");
+		clog("dest: ");
 		_debug_raw_value(raw->kind.data.store.dest);
 		break;
 	case KOOPA_RVT_GET_PTR:
-		LOG("src: ");
+		clog("src: ");
 		_debug_raw_value(raw->kind.data.get_ptr.src);
-		LOG("index: ");
+		clog("index: ");
 		_debug_raw_value(raw->kind.data.get_ptr.index);
 		break;
 	case KOOPA_RVT_GET_ELEM_PTR:
-		LOG("src: ");
+		clog("src: ");
 		_debug_raw_value(raw->kind.data.get_elem_ptr.src);
-		LOG("index: ");
+		clog("index: ");
 		_debug_raw_value(raw->kind.data.get_elem_ptr.index);
 		break;
 	case KOOPA_RVT_BINARY:
-		LOG("op: '%s', ", BINARY_OP_S[raw->kind.data.binary.op]);
-		LOG("lhs: ");
+		clog("op: '%s', ", BINARY_OP_S[raw->kind.data.binary.op]);
+		clog("lhs: ");
 		_debug_raw_value(raw->kind.data.binary.lhs);
-		LOG("rhs: ");
+		clog("rhs: ");
 		_debug_raw_value(raw->kind.data.binary.rhs);
 		break;
 	case KOOPA_RVT_BRANCH:
-		LOG("cond: ");
+		clog("cond: ");
 		_debug_raw_value(raw->kind.data.branch.cond);
-		LOG("true_bb: ");
+		clog("true_bb: ");
 		_debug_raw_basic_block(raw->kind.data.branch.true_bb);
-		LOG("false_bb: ");
+		clog("false_bb: ");
 		_debug_raw_basic_block(raw->kind.data.branch.false_bb);
-		LOG("true_args: ");
+		clog("true_args: ");
 		raw_slice(&raw->kind.data.branch.true_args);
-		LOG("false_args: ");
+		clog("false_args: ");
 		raw_slice(&raw->kind.data.branch.false_args);
 		break;
 	case KOOPA_RVT_JUMP:
-		LOG("target: ");
+		clog("target: ");
 		_debug_raw_basic_block(raw->kind.data.jump.target);
-		LOG("args: ");
+		clog("args: ");
 		raw_slice(&raw->kind.data.jump.args);
 		break;
 	case KOOPA_RVT_CALL:
-		LOG("callee: ");
+		clog("callee: ");
 		_debug_raw_function(raw->kind.data.call.callee);
-		LOG("args: ");
+		clog("args: ");
 		raw_slice(&raw->kind.data.call.args);
 		break;
 	case KOOPA_RVT_RETURN:
-		LOG("value: ");
+		clog("value: ");
 		_debug_raw_value(raw->kind.data.ret.value);
 		break;
 	}
-	LOG("}, ");
+	clog("}, ");
 #endif
 
-	LOG("}, ");
+	clog("}, ");
 }

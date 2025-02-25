@@ -37,9 +37,9 @@ static uint8_t m_reg_t_idx;
 static int m_stack_offset;
 
 /* emitter */
-#define EMIT(format, ...) fprintf(m_output, format __VA_OPT__(,) __VA_ARGS__)
+#define emit(format, ...) fprintf(m_output, format __VA_OPT__(,) __VA_ARGS__)
 
-static void OPER(const char *op, unsigned times)
+static void oper(const char *op, unsigned times)
 {
 	assert(times >= 0 && times <= 3);
 
@@ -47,59 +47,59 @@ static void OPER(const char *op, unsigned times)
 	{
 	case 0:
 		/* basically dedicated for `sw` */
-		EMIT("  %s ", op);
+		emit("  %s ", op);
 		break;
 	case 1:
 		/* one output */
 		if (m_inst_idx < 7)
-			EMIT("  %s t%d, ", op, m_inst_idx);
+			emit("  %s t%d, ", op, m_inst_idx);
 		else
-			EMIT("  %s a%d, ", op, m_inst_idx - 7);
+			emit("  %s a%d, ", op, m_inst_idx - 7);
 		break;
 	case 2:
 		/* self repeating */
 		if (m_inst_idx < 7)
-			EMIT("  %s t%d, t%d\n", op, m_inst_idx, m_inst_idx);
+			emit("  %s t%d, t%d\n", op, m_inst_idx, m_inst_idx);
 		else
-			EMIT("  %s a%d, a%d\n", op, m_inst_idx - 7,
+			emit("  %s a%d, a%d\n", op, m_inst_idx - 7,
 			     m_inst_idx - 7);
 		break;
 	case 3:
 		if (m_inst_idx < 7)
-			EMIT("  %s t%d, t%d, t%d\n", op, m_inst_idx, m_inst_idx,
+			emit("  %s t%d, t%d, t%d\n", op, m_inst_idx, m_inst_idx,
 			     m_inst_idx);
 		else
-			EMIT("  %s a%d, a%d, a%d\n", op, m_inst_idx - 7,
+			emit("  %s a%d, a%d, a%d\n", op, m_inst_idx - 7,
 			     m_inst_idx - 7, m_inst_idx - 7);
 		break;
 	}
 }
 
-static void OPND(struct variant_t *variant, bool newline)
+static void opnd(struct variant_t *variant, bool newline)
 {
 	switch (variant->tag)
 	{
 	case VALUE:
 		if (variant->value->kind.tag == KOOPA_RVT_INTEGER &&
 		    variant->value->kind.data.integer.value == 0)
-			EMIT(newline ? "x0\n" : "x0, ");
+			emit(newline ? "x0\n" : "x0, ");
 		else
 		{
 			if (--m_reg_t_idx < 7)
-				EMIT(newline ? "t%d\n" : "t%d, ", m_reg_t_idx);
+				emit(newline ? "t%d\n" : "t%d, ", m_reg_t_idx);
 			else
-				EMIT(newline ? "a%d\n" : "a%d, ",
+				emit(newline ? "a%d\n" : "a%d, ",
 				     m_reg_t_idx - 7);
 		}
 		break;
 	case INDEX:
 		if (variant->index < 7)
-			EMIT(newline ? "t%d\n" : "t%d, ", variant->index);
+			emit(newline ? "t%d\n" : "t%d, ", variant->index);
 		else
-			EMIT(newline ? "a%d\n" : "a%d, ", variant->index - 7);
+			emit(newline ? "a%d\n" : "a%d, ", variant->index - 7);
 		break;
 	case OFFSET:
-		EMIT(newline ? "%d(sp)\n" : "%d(sp)", variant->offset);
+		emit(newline ? "%d(sp)\n" : "%d(sp)", variant->offset);
 		break;
 	default:
 		panic("missing value");
@@ -135,12 +135,12 @@ static void function_prologue(koopa_raw_function_t function)
 	slice_iter(&function->bbs, reserve_stack);
 	// align to 16 bytes
 	m_stack_offset &= -16;
-	EMIT("  addi sp, sp, %d\n", m_stack_offset);
+	emit("  addi sp, sp, %d\n", m_stack_offset);
 }
 
 static void function_epilogue(void)
 {
-	EMIT("  addi sp, sp, %d\n", -m_stack_offset);
+	emit("  addi sp, sp, %d\n", -m_stack_offset);
 	// reset stack offset
 	m_stack_offset = 0;
 }
@@ -150,8 +150,23 @@ static void raw_kind_load(koopa_raw_load_t *load)
 {
 	struct variant_t src = raw_value(load->src);
 
-	OPER("lw", 1);
-	OPND(&src, true);
+	oper("lw", 1);
+	opnd(&src, true);
+}
+
+static void raw_kind_branch(koopa_raw_branch_t *branch)
+{
+	struct variant_t cond = raw_value(branch->cond);
+
+	oper("bnez", 0);
+	opnd(&cond, false);
+	emit("%s\n", branch->true_bb->name + 1);
+	emit("  j %s\n", branch->false_bb->name + 1);
+}
+
+static void raw_kind_jump(koopa_raw_jump_t *jump)
+{
+	emit("  j %s\n", jump->target->name + 1);
 }
 
 static void raw_kind_store(koopa_raw_store_t *store)
@@ -159,19 +174,19 @@ static void raw_kind_store(koopa_raw_store_t *store)
 	struct variant_t value = raw_value(store->value);
 	struct variant_t dest = raw_value(store->dest);
 
-	OPER("sw", 0);
-	OPND(&value, false);
-	OPND(&dest, true);
+	oper("sw", 0);
+	opnd(&value, false);
+	opnd(&dest, true);
 }
 
 static void raw_kind_return(koopa_raw_return_t *ret)
 {
 	struct variant_t value = raw_value(ret->value);
 
-	EMIT("  mv a0, ");
-	OPND(&value, true);
+	emit("  mv a0, ");
+	opnd(&value, true);
 	function_epilogue();
-	EMIT("  ret\n");
+	emit("  ret\n");
 }
 
 static void raw_kind_binary(koopa_raw_binary_t *binary)
@@ -183,93 +198,91 @@ static void raw_kind_binary(koopa_raw_binary_t *binary)
 	switch (binary->op)
 	{
 	case KOOPA_RBO_NOT_EQ:
-		OPER("xor", 1);
-		OPND(&lhs, false);
-		OPND(&rhs, true);
-		OPER("snez", 2);
+		oper("xor", 1);
+		opnd(&lhs, false);
+		opnd(&rhs, true);
+		oper("snez", 2);
 		break;
 	case KOOPA_RBO_EQ:
-		OPER("xor", 1);
-		OPND(&lhs, false);
-		OPND(&rhs, true);
-		OPER("seqz", 2);
+		oper("xor", 1);
+		opnd(&lhs, false);
+		opnd(&rhs, true);
+		oper("seqz", 2);
 		break;
 	case KOOPA_RBO_GT:
-		OPER("sgt", 1);
-		OPND(&lhs, false);
-		OPND(&rhs, true);
+		oper("sgt", 1);
+		opnd(&lhs, false);
+		opnd(&rhs, true);
 		break;
 	case KOOPA_RBO_LT:
-		OPER("slt", 1);
-		OPND(&lhs, false);
-		OPND(&rhs, true);
+		oper("slt", 1);
+		opnd(&lhs, false);
+		opnd(&rhs, true);
 		break;
 	case KOOPA_RBO_GE:
-		OPER("slt", 1);
-		OPND(&lhs, false);
-		OPND(&rhs, true);
-		OPER("seqz", 2);
+		oper("slt", 1);
+		opnd(&lhs, false);
+		opnd(&rhs, true);
+		oper("seqz", 2);
 		break;
 	case KOOPA_RBO_LE:
-		OPER("sgt", 1);
-		OPND(&lhs, false);
-		OPND(&rhs, true);
-		OPER("seqz", 2);
+		oper("sgt", 1);
+		opnd(&lhs, false);
+		opnd(&rhs, true);
+		oper("seqz", 2);
 		break;
 	case KOOPA_RBO_ADD:
-		OPER("add", 1);
-		OPND(&lhs, false);
-		OPND(&rhs, true);
+		oper("add", 1);
+		opnd(&lhs, false);
+		opnd(&rhs, true);
 		break;
 	case KOOPA_RBO_SUB:
-		OPER("sub", 1);
-		OPND(&lhs, false);
-		OPND(&rhs, true);
+		oper("sub", 1);
+		opnd(&lhs, false);
+		opnd(&rhs, true);
 		break;
 	case KOOPA_RBO_MUL:
-		OPER("mul", 1);
-		OPND(&lhs, false);
-		OPND(&rhs, true);
+		oper("mul", 1);
+		opnd(&lhs, false);
+		opnd(&rhs, true);
 		break;
 	case KOOPA_RBO_DIV:
-		OPER("div", 1);
-		OPND(&lhs, false);
-		OPND(&rhs, true);
+		oper("div", 1);
+		opnd(&lhs, false);
+		opnd(&rhs, true);
 		break;
 	case KOOPA_RBO_MOD:
-		OPER("rem", 1);
-		OPND(&lhs, false);
-		OPND(&rhs, true);
+		oper("rem", 1);
+		opnd(&lhs, false);
+		opnd(&rhs, true);
 		break;
 	case KOOPA_RBO_AND:
-		OPER("and", 1);
-		OPND(&lhs, false);
-		OPND(&rhs, true);
+		oper("and", 1);
+		opnd(&lhs, false);
+		opnd(&rhs, true);
 		break;
 	case KOOPA_RBO_OR:
-		OPER("or", 1);
-		OPND(&lhs, false);
-		OPND(&rhs, true);
+		oper("or", 1);
+		opnd(&lhs, false);
+		opnd(&rhs, true);
 		break;
 	case KOOPA_RBO_XOR:
-		OPER("xor", 1);
-		OPND(&lhs, false);
-		OPND(&rhs, true);
+		oper("xor", 1);
+		opnd(&lhs, false);
+		opnd(&rhs, true);
 		break;
 	case KOOPA_RBO_SHL:
-		OPER("sll", 1);
-		OPND(&lhs, false);
-		OPND(&rhs, true);
+		oper("sll", 1);
+		opnd(&lhs, false);
+		opnd(&rhs, true);
 		break;
 	case KOOPA_RBO_SHR:
-		OPER("srl", 1);
-		OPND(&lhs, false);
-		OPND(&rhs, true);
+		unimplemented();
 		break;
 	case KOOPA_RBO_SAR:
-		OPER("sra", 1);
-		OPND(&lhs, false);
-		OPND(&rhs, true);
+		oper("sra", 1);
+		opnd(&lhs, false);
+		opnd(&rhs, true);
 		break;
 	}
 }
@@ -279,9 +292,9 @@ static void raw_kind_integer(koopa_raw_integer_t *integer)
 	if (integer->value != 0)
 	{
 		if (m_reg_t_idx < 7)
-			EMIT("  li t%d, %d\n", m_reg_t_idx++, integer->value);
+			emit("  li t%d, %d\n", m_reg_t_idx++, integer->value);
 		else
-			EMIT("  li a%d, %d\n", m_reg_t_idx++ - 7,
+			emit("  li a%d, %d\n", m_reg_t_idx++ - 7,
 			     integer->value);
 	}
 }
@@ -322,7 +335,7 @@ static void raw_slice(const koopa_raw_slice_t *slice)
 
 /* weird return type... i wonder if there's a better way to backtrack.
  * currently if we're not using `struct variant_t` we'll have to call
- * `htable_lookup()` twice: first in this function, then in `OPND()`. */
+ * `htable_lookup()` twice: first in this function, then in `opnd()`. */
 static struct variant_t raw_value(koopa_raw_value_t raw)
 {
 	if (!raw)
@@ -362,9 +375,10 @@ static struct variant_t raw_value(koopa_raw_value_t raw)
 		todo();
 		break;
 	case KOOPA_RVT_AGGREGATE:
-		raw_slice(&raw->kind.data.aggregate.elems);
+		unimplemented();
 		break;
 	case KOOPA_RVT_GLOBAL_ALLOC:
+		todo();
 		raw_value(raw->kind.data.global_alloc.init);
 		break;
 	case KOOPA_RVT_LOAD:
@@ -376,10 +390,12 @@ static struct variant_t raw_value(koopa_raw_value_t raw)
 		htable_insert(m_ht_insts, raw, m_inst_idx);
 		break;
 	case KOOPA_RVT_GET_PTR:
+		todo();
 		raw_value(raw->kind.data.get_ptr.src);
 		raw_value(raw->kind.data.get_ptr.index);
 		break;
 	case KOOPA_RVT_GET_ELEM_PTR:
+		todo();
 		raw_value(raw->kind.data.get_elem_ptr.src);
 		raw_value(raw->kind.data.get_elem_ptr.index);
 		break;
@@ -388,17 +404,15 @@ static struct variant_t raw_value(koopa_raw_value_t raw)
 		htable_insert(m_ht_insts, raw, m_inst_idx);
 		break;
 	case KOOPA_RVT_BRANCH:
-		raw_value(raw->kind.data.branch.cond);
-		raw_basic_block(raw->kind.data.branch.true_bb);
-		raw_basic_block(raw->kind.data.branch.false_bb);
-		raw_slice(&raw->kind.data.branch.true_args);
-		raw_slice(&raw->kind.data.branch.false_args);
+		raw_kind_branch(&raw->kind.data.branch);
+		htable_insert(m_ht_insts, raw, m_inst_idx);
 		break;
 	case KOOPA_RVT_JUMP:
-		raw_basic_block(raw->kind.data.jump.target);
-		raw_slice(&raw->kind.data.jump.args);
+		raw_kind_jump(&raw->kind.data.jump);
+		htable_insert(m_ht_insts, raw, m_inst_idx);
 		break;
 	case KOOPA_RVT_CALL:
+		todo();
 		raw_function(raw->kind.data.call.callee);
 		raw_slice(&raw->kind.data.call.args);
 		break;
@@ -418,8 +432,11 @@ static void raw_basic_block(koopa_raw_basic_block_t raw)
 	if (!raw)
 		return;
 
+	emit("%s:\n", raw->name + 1);
 	raw_slice(&raw->params);
-	// raw_slice(&raw->used_by);
+#if 0
+	raw_slice(&raw->used_by);
+#endif
 	raw_slice(&raw->insts);
 }
 
@@ -429,8 +446,8 @@ static void raw_function(koopa_raw_function_t raw)
 		return;
 
 	if (strcmp(raw->name, "@main") == 0)
-		EMIT("  .globl main\n");
-	EMIT("%s:\n", raw->name + 1);
+		emit("  .globl main\n");
+	emit("%s:\n", raw->name + 1);
 
 	// TODO: really ugly, should be refactored
 	function_prologue(raw);
@@ -473,11 +490,11 @@ void codegen(const koopa_raw_program_t *program, FILE *output)
 
 #if 0
 	koopa_raw_slice_t *values = &program->values;
-	EMIT("  .data\n");
+	emit("  .data\n");
 	raw_slice(values);
 #endif
 	koopa_raw_slice_t *funcs = &program->funcs;
-	EMIT("  .text\n");
+	emit("  .text\n");
 	raw_slice(funcs);
 
 	htable_ptru32_delete(m_ht_offsets);
