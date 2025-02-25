@@ -1,5 +1,5 @@
 # Based on https://matansilver.com/2017/08/29/universal-makefile/
-# Modified by MaxXing
+# Modified by MaxXing, megakite
 
 # Settings
 # Set to 0 to enable C mode
