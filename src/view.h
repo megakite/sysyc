@@ -14,7 +14,7 @@ struct view_t {
 	} /* capture */;
 };
 
-inline static void *view_next_null(struct view_t *this)
+inline static void *VIEW_NULL(struct view_t *this)
 {
 	(void) this;
 	return NULL;

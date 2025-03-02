@@ -144,12 +144,12 @@ static enum function_type_e FuncType(const struct node_t *node)
 
 	char *type = node->children[0]->data.value.s;
 
-	if (strcmp(type, "void") == 0)
-		todo();
 	if (strcmp(type, "int") == 0)
 		return INT;
+	if (strcmp(type, "void") == 0)
+		todo();
 
-	panic("unsupported FuncType");
+	panic("unknown FuncType");
 }
 
 static void Block(const struct node_t *node)
@@ -240,7 +240,7 @@ static int32_t Exp(const struct node_t *node)
 			return lhs != rhs;
 		if (strcmp(op_token, "==") == 0)
 			return lhs == rhs;
-		panic("unsupported EQOP");
+		panic("unknown equity operator");
 	case AST_RELOP:
 		if (strcmp(op_token, ">") == 0)
 			return lhs > rhs;
@@ -250,18 +250,19 @@ static int32_t Exp(const struct node_t *node)
 			return lhs >= rhs;
 		if (strcmp(op_token, "<=") == 0)
 			return lhs <= rhs;
-		panic("unsupported RELOP");
+		panic("unknown relational operator");
 	case AST_SHOP:
 		if (strcmp(op_token, ">>") == 0)
 			return lhs >> rhs;
 		if (strcmp(op_token, "<<") == 0)
 			return lhs << rhs;
+		panic("unknown shift operator");
 	case AST_ADDOP:
 		if (strcmp(op_token, "+") == 0)
 			return lhs + rhs;
 		if (strcmp(op_token, "-") == 0)
 			return lhs - rhs;
-		panic("unsupported ADDOP");
+		panic("unknown additive operator");
 	case AST_MULOP:
 		if (strcmp(op_token, "*") == 0)
 			return lhs * rhs;
@@ -269,7 +270,7 @@ static int32_t Exp(const struct node_t *node)
 			return lhs / rhs;
 		if (strcmp(op_token, "%") == 0)
 			return lhs % rhs;
-		panic("unsupported MULOP");
+		panic("unknown multiplicative operator");
 	default:
 		todo();
 	}
@@ -297,7 +298,7 @@ static int32_t UnaryExp(const struct node_t *node)
 	case '!':
 		return !operand;
 	default:
-		panic("unsupported unary operator");
+		panic("unknown unary operator");
 	}
 }
 
@@ -343,8 +344,10 @@ static void Decl(const struct node_t *node)
 	symbols_indent(g_symbols);
 	if (node->children[0]->data.kind == AST_ConstDecl)
 		ConstDecl(node->children[0]);
-	if (node->children[0]->data.kind == AST_VarDecl)
+	else if (node->children[0]->data.kind == AST_VarDecl)
 		VarDecl(node->children[0]);
+	else
+		unreachable();
 	// no need to `leave()` here, we'll clean it up when we exit this block
 }
 

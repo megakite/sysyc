@@ -108,7 +108,7 @@ struct view_t htable_strsym_lookup(htable_strsym_t table, char *key)
 	uint8_t i = hash_str(key);
 	struct _htable_strsym_item_t *item = table->data[i];
 	if (!item)
-		return (struct view_t) { .next = &view_next_null };
+		return (struct view_t) { .next = &VIEW_NULL };
 
 	return (struct view_t) { .begin = &item->value, .next = &strsym_next,
 				 .key = key };
