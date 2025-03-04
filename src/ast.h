@@ -10,7 +10,7 @@
 
 #include "node.h"
 
-struct node_t *ast_nterm(enum ast_kind_e kind, int lineno, int count, ...);
+struct node_t *ast_nterm(enum ast_kind_e kind, int count, ...);
 
 struct node_t *_ast_term_int(enum ast_kind_e kind, int value);
 struct node_t *_ast_term_string(enum ast_kind_e kind, const char *value);

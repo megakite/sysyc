@@ -8,7 +8,7 @@
 
 #include "koopa.h"
 
-/* TODO: make these invisible from other transition units */
+/* TODO make these invisible from other transition units */
 void _debug_raw_type(koopa_raw_type_t raw);
 void _debug_raw_function(koopa_raw_function_t raw);
 void _debug_raw_basic_block(koopa_raw_basic_block_t raw);

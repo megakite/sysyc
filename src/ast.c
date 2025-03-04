@@ -6,13 +6,24 @@
 #include "ast.h"
 #include "macros.h"
 
+extern int yylineno;
+
 static const char *AST_KIND_S[] = {
-	"UNKNOWN",
+#if 0
+	"YYEMPTY",
+#endif
+	"YYEOF",
+	"YYerror",
+	"YYUNDEF",
 	"INT_CONST",
 	"IDENT",
 	"SEMI",
-	"COMMA",
-	"ASSIGN",
+	"TYPE",
+	"LP",
+	"RP",
+	"LC",
+	"RC",
+	"RETURN",
 	"RELOP",
 	"EQOP",
 	"SHOP",
@@ -21,51 +32,56 @@ static const char *AST_KIND_S[] = {
 	"MULOP",
 	"LAND",
 	"LOR",
-	"TYPE",
-	"LP",
-	"RP",
-	"LB",
-	"RB",
-	"LC",
-	"RC",
-	"RETURN",
+	"CONST",
+	"ASSIGN",
+	"COMMA",
 	"IF",
 	"ELSE",
 	"WHILE",
-	"END_OF_TERM",
+	"BREAK",
+	"CONTINUE",
+	"LB",
+	"RB",
+	"LOWER_THAN_ELSE",
+	"YYACCEPT",
 	"CompUnit",
+	"FuncDefList",
 	"FuncDef",
+	"FuncFParamsList",
+	"FuncFParam",
 	"FuncType",
 	"Block",
+	"BlockItemList",
+	"BlockItem",
 	"Stmt",
 	"Number",
 	"Exp",
 	"PrimaryExp",
 	"UnaryExp",
+	"FuncRParamsList",
+	"FuncRParam",
 	"Decl",
 	"ConstDecl",
+	"ConstDefList",
 	"BType",
 	"ConstDef",
 	"ConstInitVal",
 	"VarDecl",
+	"VarDefList",
 	"VarDef",
 	"InitVal",
-	"BlockItem",
 	"LVal",
 	"ConstExp",
-	"ConstDefList",
-	"VarDefList",
-	"BlockItemList",
 };
 
-struct node_t *ast_nterm(enum ast_kind_e kind, int lineno, int count, ...)
+struct node_t *ast_nterm(enum ast_kind_e kind, int count, ...)
 {
-	assert(kind > AST_END_OF_TERM);
+	assert(kind > AST_YYACCEPT);
 
 	struct node_data_t data = {
 		.kind = kind,
 		.terminal = false,
-		.lineno = lineno,
+		.lineno = yylineno,
 	};
 	struct node_t *new = node_new(data, count);
 
@@ -82,8 +98,7 @@ struct node_t *ast_nterm(enum ast_kind_e kind, int lineno, int count, ...)
 
 struct node_t *_ast_term_int(enum ast_kind_e kind, int value)
 {
-	assert(kind != AST_UNKNOWN);
-	assert(kind < AST_END_OF_TERM);
+	assert(kind < AST_YYACCEPT);
 
 	struct node_data_t data = {
 		.terminal = true,
@@ -96,8 +111,7 @@ struct node_t *_ast_term_int(enum ast_kind_e kind, int value)
 
 struct node_t *_ast_term_string(enum ast_kind_e kind, const char *value)
 {
-	assert(kind != AST_UNKNOWN);
-	assert(kind < AST_END_OF_TERM);
+	assert(kind < AST_YYACCEPT);
 
 	struct node_data_t data = {
 		.terminal = true,
@@ -119,9 +133,6 @@ static void lambda_print(void *ptr, int depth)
 
 	switch (data->kind)
 	{
-	case AST_UNKNOWN:
-		unreachable();
-		break;
 	case AST_INT_CONST:
 		printf("%s : %d\n", AST_KIND_S[data->kind], data->value.i);
 		break;

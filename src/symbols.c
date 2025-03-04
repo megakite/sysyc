@@ -38,6 +38,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+#include "globals.h"
 #include "hashtable.h"
 #include "symbols.h"
 #include "vector.h"
@@ -46,7 +47,7 @@
 #define container_of(ptr, type, member)	\
 	(type *)((char *)(ptr) - offsetof(type, member))
 
-/* XXX: friend class HashTable<String, Symbol> */
+/* XXX friend class HashTable<String, Symbol> */
 struct _htable_strsym_item_t {
 	struct _htable_strsym_item_t *next;
 	struct _htable_strsym_item_t *link;
@@ -69,6 +70,55 @@ struct _symbols_t {
 	uint16_t depth;
 	int16_t level;
 };
+
+/* ctor. of symbols */
+struct symbol_t symbol_constant(int32_t value)
+{
+	struct symbol_t symbol = {
+		.meta = {
+			.level = symbols_level(g_symbols),
+			.scope = symbols_scope(g_symbols),
+		},
+		.tag = CONSTANT,
+		.constant = {
+			.value = value,
+			.raw = NULL,
+		},
+	};
+	return symbol;
+}
+
+struct symbol_t symbol_variable(void)
+{
+	struct symbol_t symbol = {
+		.meta = {
+			.level = symbols_level(g_symbols),
+			.scope = symbols_scope(g_symbols),
+		},
+		.tag = VARIABLE,
+		.variable = {
+			.raw = NULL,
+		},
+	};
+	return symbol;
+}
+
+struct symbol_t symbol_function(uint32_t params, enum symbol_type_e type)
+{
+	struct symbol_t symbol = {
+		.meta = {
+			.level = symbols_level(g_symbols),
+			.scope = symbols_scope(g_symbols),
+		},
+		.tag = CONSTANT,
+		.function = {
+			.raw = NULL,
+			.params = params,
+			.type = type,
+		},
+	};
+	return symbol;
+}
 
 /* private class Layer; basically a queue */
 struct level_t {
@@ -185,7 +235,8 @@ struct symbol_t *symbols_get(const symbols_t symbols, char *ident)
 	return symbol;
 }
 
-void symbols_add(symbols_t symbols, char *ident, struct symbol_t symbol)
+struct symbol_t *symbols_add(symbols_t symbols, char *ident,
+			     struct symbol_t symbol)
 {
 	struct level_t *level = symbols->levels->data[symbols->level];
 	struct symbol_t *new = htable_insert(symbols->table, ident, symbol);
@@ -197,6 +248,8 @@ void symbols_add(symbols_t symbols, char *ident, struct symbol_t symbol)
 	else
 		symbols->last_item->link = new_item;
 	symbols->last_item = new_item;
+
+	return new;
 }
 
 struct view_t symbols_lookup(const symbols_t symbols, char *ident)

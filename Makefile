@@ -23,7 +23,7 @@ ifeq ($(DEBUG), 0)
 CFLAGS += -O2
 CXXFLAGS += -O2
 else
-CFLAGS += -g -Og # -O0 would cause false positives on longjmp checks
+CFLAGS += -g -Og
 CXXFLAGS += -g -Og
 endif
 

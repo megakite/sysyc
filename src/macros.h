@@ -20,24 +20,27 @@
 	{							\
 		fprintf(stderr, "todo: %s\n", __func__);	\
 		assert(false /* todo */);			\
-	} while (0)
+	} while (false)
+
 #define unimplemented()							\
 	do								\
 	{								\
 		fprintf(stderr, "unimplemented: %s\n", __func__);	\
 		assert(false /* unimplemented */);			\
-	} while (0)
-#define unreachable()						\
-	do							\
-	{							\
-		fprintf(stderr, "unreachable: %s\n", __func__);	\
-		assert(false /* unreachable */);		\
-	} while (0)
+	} while (false)
+
 #define panic(msg)							\
 	do								\
 	{								\
 		fprintf(stderr, "panic: %s from %s\n", msg, __func__);	\
 		assert(false /* panic */);				\
-	} while (0)
+	} while (false)
+
+#define unreachable()						\
+	do							\
+	{							\
+		fprintf(stderr, "unreachable: %s\n", __func__);	\
+		assert(false /* unreachable */);		\
+	} while (false)
 
 #endif//_MACROS_H_

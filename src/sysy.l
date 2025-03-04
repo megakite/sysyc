@@ -1,6 +1,5 @@
 %option noyywrap
 %option nounput
-%option noinput
 %option yylineno
 
 %{
@@ -11,11 +10,12 @@
 /* state variables */
 bool error = false;
 #if 0
-#define YY_USER_ACTION						 \
-	do {							 \
-		yylloc.first_column = yycolumn;			 \
-		yylloc.last_column = yycolumn + yyleng - 1;	 \
-		yycolumn += yyleng;				 \
+#define YY_USER_ACTION					    \
+	do						    \
+	{						    \
+		yylloc.first_column = yycolumn;		    \
+		yylloc.last_column = yycolumn + yyleng - 1; \
+		yycolumn += yyleng;			    \
 	} while (0);
 #endif
 %}
@@ -25,7 +25,7 @@ NEWLINE		"\n"|"\r\n"
 
 /* comments */
 Comment		"//".*
-BlockComment	"/*".*"*/"
+BlockComment	"/*"
 
 /* IDENT */
 Identifier	[_A-Za-z][_A-Za-z0-9]*
@@ -80,13 +80,20 @@ CONST		"const"
 IF		"if"
 ELSE		"else"
 WHILE		"while"
+BREAK		"break"
+CONTINUE	"continue"
 
 %%
 
-{Comment}
-{BlockComment}
 {WS}
-{NEWLINE}	{ /* yycolumn = 1; */ }
+{NEWLINE}
+
+{Comment}
+{BlockComment}	{ char c;
+		  while (true) { while ((c = input()) != '*') continue;
+				 if (c == EOF) { error = true; break; }
+				 if (c == '*') { if (input() != '/') error = 1;
+						 break; } } }
 
 {Greater}	{ yylval.s = strdup(yytext); return RELOP; }
 {Less}		{ yylval.s = strdup(yytext); return RELOP; }
@@ -127,6 +134,8 @@ WHILE		"while"
 {IF}		{ yylval.s = strdup(yytext); return IF; }
 {ELSE}		{ yylval.s = strdup(yytext); return ELSE; }
 {WHILE}		{ yylval.s = strdup(yytext); return WHILE; }
+{BREAK}		{ yylval.s = strdup(yytext); return BREAK; }
+{CONTINUE}	{ yylval.s = strdup(yytext); return CONTINUE; }
 
 {Decimal}	{ yylval.i = atoi(yytext); return INT_CONST; }
 {Octal}		{ yylval.i = strtol(yytext, NULL, 8); return INT_CONST; }

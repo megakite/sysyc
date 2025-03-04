@@ -13,6 +13,7 @@
 
 /* state variables */
 static bool m_constexpr;
+static bool m_while;
 static const struct node_t *m_this_node;
 
 /* thrower */
@@ -30,58 +31,10 @@ static void error(const char *fmt, ...)
 	longjmp(g_exception_env, 3);
 }
 
-/* ctor.s */
-static struct symbol_t symbol_constant(int32_t value)
-{
-	struct symbol_t symbol = {
-		.meta = {
-			.level = symbols_level(g_symbols),
-			.scope = symbols_scope(g_symbols),
-		},
-		.tag = CONSTANT,
-		.constant = {
-			.value = value,
-			.raw = NULL,
-		},
-	};
-	return symbol;
-}
-
-static struct symbol_t symbol_variable(void)
-{
-	struct symbol_t symbol = {
-		.meta = {
-			.level = symbols_level(g_symbols),
-			.scope = symbols_scope(g_symbols),
-		},
-		.tag = VARIABLE,
-		.variable = {
-			.raw = NULL,
-		},
-	};
-	return symbol;
-}
-
-static struct symbol_t symbol_function(enum function_type_e type)
-{
-	struct symbol_t symbol = {
-		.meta = {
-			.level = symbols_level(g_symbols),
-			.scope = symbols_scope(g_symbols),
-		},
-		.tag = CONSTANT,
-		.function = {
-			.type = type,
-			.raw = NULL,
-		},
-	};
-	return symbol;
-}
-
 /* accessor decl.s */
 static void CompUnit(const struct node_t *node);
 static void FuncDef(const struct node_t *node);
-static enum function_type_e FuncType(const struct node_t *node);
+static enum symbol_type_e FuncType(const struct node_t *node);
 static void Block(const struct node_t *node);
 static void Stmt(const struct node_t *node);
 static int32_t Number(const struct node_t *node);
@@ -108,6 +61,12 @@ static void ConstDefList(const struct node_t *node);
 static void VarDefList(const struct node_t *node);
 static void BlockItemList(const struct node_t *node);
 
+static void FuncDefList(const struct node_t *node);
+static uint32_t FuncFParamsList(const struct node_t *node);
+static void FuncFParam(const struct node_t *node);
+static void FuncRParamsList(const struct node_t *node);
+static void FuncRParam(const struct node_t *node);
+
 /* accessor defn.s */
 static void CompUnit(const struct node_t *node)
 {
@@ -115,7 +74,7 @@ static void CompUnit(const struct node_t *node)
 	m_this_node = node;
 
 	symbols_indent(g_symbols);
-	FuncDef(node->children[0]);
+	FuncDefList(node->children[0]);
 	symbols_leave(g_symbols);
 }
 
@@ -131,13 +90,24 @@ static void FuncDef(const struct node_t *node)
 		if (symbols_here(g_symbols, it))
 			error("Redefinition of function: `%s`", name);
 
-	enum function_type_e type = FuncType(node->children[0]);
-	symbols_add(g_symbols, name, symbol_function(type));
+	uint32_t params = (node->size == 4) ? FuncFParamsList(node->children[3])
+					    : 0;
+	enum symbol_type_e type = FuncType(node->children[0]);
+	symbols_add(g_symbols, name, symbol_function(params, type));
 
 	Block(node->children[2]);
 }
 
-static enum function_type_e FuncType(const struct node_t *node)
+static void FuncDefList(const struct node_t *node)
+{
+	assert(node && node->data.kind == AST_FuncDefList);
+	m_this_node = node;
+
+	for (int i = node->size - 1; i >= 0; --i)
+		FuncDef(node->children[i]);
+}
+
+static enum symbol_type_e FuncType(const struct node_t *node)
 {
 	assert(node && node->data.kind == AST_FuncType);
 	m_this_node = node;
@@ -167,10 +137,11 @@ static void Stmt(const struct node_t *node)
 	assert(node && node->data.kind == AST_Stmt);
 	m_this_node = node;
 
+	bool this_while = m_while;
 	switch (node->children[0]->data.kind)
 	{
 	case AST_SEMI:
-		/* empty Stmt, do nothing */
+		/* do nothing */
 		break;
 	case AST_Exp:
 		Exp(node->children[0]);
@@ -195,11 +166,25 @@ static void Stmt(const struct node_t *node)
 			Exp(node->children[1]);
 		break;
 	case AST_IF:
-		/* IF (LP) Exp (RP) Stmt [ELSE Stmt] */
+		/* IF (LP) Exp (RP) Stmt [(ELSE) Stmt] */
 		Exp(node->children[1]);
 		Stmt(node->children[2]);
 		if (node->size == 4)
 			Stmt(node->children[3]);
+		break;
+	case AST_WHILE:
+		Exp(node->children[1]);
+		// "push"
+		m_while = true;
+		Stmt(node->children[2]);
+		// "pop"
+		m_while = this_while;
+		break;
+	case AST_BREAK:
+	case AST_CONTINUE:
+		if (!m_while)
+			error("`break` and `continue` statements are only allow"
+			      "ed in body of `while`");
 		break;
 	default:
 		todo();
@@ -281,9 +266,28 @@ static int32_t UnaryExp(const struct node_t *node)
 	assert(node && node->data.kind == AST_UnaryExp);
 	m_this_node = node;
 
-	/* sole primary expression (fixed point) */
-	if (node->size == 1)
+	/* already computed expressions (fixed point) */
+	switch (node->children[0]->data.kind)
+	{
+	case AST_PrimaryExp:
 		return PrimaryExp(node->children[0]);
+	case AST_IDENT:
+		/* function calls.
+		 * IDENT (LP) [FuncRParams] (RP) */
+		{
+		char *ident = node->children[0]->data.value.s;
+
+		struct symbol_t *symbol = symbols_get(g_symbols, ident);
+		if (!symbol)
+			error("Undefined function: `%s`", ident);
+
+		if (node->size == 2)
+			FuncRParamsList(node->children[1]);
+		}
+		return 0;
+	default:
+		/* fallthrough */;
+	}
 
 	/* otherwise, continguous unary expression */
 	char op_token = node->children[0]->data.value.s[0];
@@ -475,6 +479,43 @@ static void BlockItemList(const struct node_t *node)
 
 	for (int i = node->size - 1; i >= 0; --i)
 		BlockItem(node->children[i]);
+}
+
+static void FuncRParamsList(const struct node_t *node)
+{
+	assert(node && node->data.kind == AST_FuncRParamsList);
+	m_this_node = node;
+
+	for (int i = node->size - 1; i >= 0; --i)
+		FuncRParam(node->children[i]);
+}
+
+static void FuncRParam(const struct node_t *node)
+{
+	assert(node && node->data.kind == AST_FuncRParam);
+	m_this_node = node;
+
+	Exp(node->children[0]);
+}
+
+static uint32_t FuncFParamsList(const struct node_t *node)
+{
+	assert(node && node->data.kind == AST_FuncFParamsList);
+	m_this_node = node;
+
+	for (int i = node->size - 1; i >= 0; --i)
+		FuncFParam(node->children[i]);
+
+	return node->size;
+}
+
+static void FuncFParam(const struct node_t *node)
+{
+	assert(node && node->data.kind == AST_FuncFParam);
+	m_this_node = node;
+
+	if (strcmp(node->children[0]->data.value.s, "int") != 0)
+		error("Only `int` params are supported");
 }
 
 void semantic(const struct node_t *comp_unit)

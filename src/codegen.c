@@ -37,48 +37,58 @@ static FILE *m_output;
 static htable_ptru32_t m_ht_insts;
 static htable_ptru32_t m_ht_offsets;
 
-static uint32_t m_inst_idx;
 static uint32_t m_var_count;
 static uint32_t m_val_count;
 static int32_t m_stack_offset;
-static uint8_t m_reg_t_idx;
+static int32_t m_inst_idx = -1;
+static int32_t m_reg_t_idx;
 
 /* emitters */
 #define emit(format, ...) \
 	fprintf(m_output, format __VA_OPT__(,) __VA_ARGS__)
 
-/* XXX: very, very, very loosely implemented `yield` mechanism */
+/* XXX very, very, very loosely implemented `yield` mechanism */
 static uint8_t m_yield_begin;
 static uint8_t m_yield_end;
 static jmp_buf m_yield[2];
 static jmp_buf m_next[2];
 
-#define yield(expr)					\
-	do						\
-	{						\
-		assert(m_yield_end < 2);		\
-		uint8_t order = m_yield_end++;		\
-							\
-		if (setjmp(m_yield[order]) == 1)	\
-			longjmp(m_next[order], expr);	\
-		return;					\
-	}						\
+#define r_let(type, name, reg, init)	  \
+	register type name __asm__(#reg); \
+	__asm__("mov %1, %0\n\t"	  \
+		: "=r" (name)		  \
+		: "r" (init))
+
+#define yield(expr)							   \
+	do								   \
+	{								   \
+		assert(m_yield_end < 2);				   \
+		/* FIXME theoretically local variables must be placed into \
+		 * callee-saved registers, since stack will be overwritten \
+		 * after return. see setjmp(3): Undefined Behavior */      \
+		r_let(uint8_t, order, r12, m_yield_end);		   \
+		++m_yield_end;						   \
+		if (setjmp(m_yield[order]) == 1)			   \
+			longjmp(m_next[order], expr);			   \
+		return;							   \
+	}								   \
 	while (false)
 
-#define next()								\
-	do								\
-	{								\
-		if (m_yield_begin == 0 && m_yield_end == 0)		\
-			break;						\
-		uint8_t order = m_yield_begin++;			\
-									\
-		if (setjmp(m_next[order]) == 0)				\
-		{							\
-			if (m_yield_begin == m_yield_end)		\
-				m_yield_begin = m_yield_end = 0;	\
-			longjmp(m_yield[order], 1);			\
-		}							\
-	}								\
+#define next()							 \
+	do							 \
+	{							 \
+		if (m_yield_begin == 0 && m_yield_end == 0)	 \
+			break;					 \
+		/* vice versa */				 \
+		r_let(uint8_t, order, r12, m_yield_begin);	 \
+		++m_yield_begin;				 \
+		if (setjmp(m_next[order]) == 0)			 \
+		{						 \
+			if (m_yield_begin == m_yield_end)	 \
+				m_yield_begin = m_yield_end = 0; \
+			longjmp(m_yield[order], 1);		 \
+		}						 \
+	}							 \
 	while (false)
 
 /* register limits */
@@ -89,8 +99,9 @@ static jmp_buf m_next[2];
 
 /* getters */
 #define m_inst_sp ((m_inst_idx - REG_MAX + m_var_count) * sizeof(uint32_t))
-#define reg_t_sp ((reg_t_idx - REG_MAX + m_var_count) * sizeof(uint32_t))
-#define variant_sp ((variant->index - REG_MAX + m_var_count) * sizeof(uint32_t))
+#define _m_reg_t_sp ((_m_reg_t_idx - REG_MAX + m_var_count) * sizeof(uint32_t))
+#define _variant_sp \
+	((_variant->index - REG_MAX + m_var_count) * sizeof(uint32_t))
 
 static void oper(const char *op, int times)
 {
@@ -109,17 +120,13 @@ static void oper(const char *op, int times)
 		else
 			emit("  %s a6, ", op);
 
-		if (m_yield_end == 2)
+		while (m_yield_end)
 		{
 			next();
-			emit(", ");
-			next();
-			emit("\n");
-		}
-		else if (m_yield_end == 1)
-		{
-			next();
-			emit("\n");
+			if (m_yield_end != 0)
+				emit(", ");
+			else
+				emit("\n");
 		}
 		break;
 	case 2:
@@ -139,73 +146,61 @@ static void oper(const char *op, int times)
 
 static void opnd(struct variant_t *variant)
 {
-	uint8_t reg_t_idx;
-	int32_t value;
+	/* FIXME these actually have no effect at all...unless we use inline asm
+	 * to call each `yield` manually with `r13` and `r14` as parameters */
+	r_let(int32_t, _m_reg_t_idx, r13, m_reg_t_idx);
+	r_let(struct variant_t *, _variant, r14, variant);
 
-	switch (variant->tag)
+	switch (_variant->tag)
 	{
 	case VALUE:
-		// make a local copy
-		reg_t_idx = m_reg_t_idx++;
+		++m_reg_t_idx;
 
 		/* special case for immediate */
-		if (variant->value->kind.tag == KOOPA_RVT_INTEGER)
+		if (_variant->value->kind.tag == KOOPA_RVT_INTEGER)
 		{
-			value = variant->value->kind.data.integer.value;
-			if (value == 0)
+			if (_variant->value->kind.data.integer.value == 0)
 				yield(emit("x0"));
 
-			if (reg_t_idx < T_MAX)
-				emit("  li t%d, %d\n", reg_t_idx, value);
-			else if (reg_t_idx < REG_MAX)
-				emit("  li a%d, %d\n", reg_t_idx - T_MAX,
-				     value);
+			if (_m_reg_t_idx < T_MAX)
+				emit("  li t%d, %d\n", _m_reg_t_idx, 
+				     _variant->value->kind.data.integer.value);
+			else if (_m_reg_t_idx < REG_MAX)
+				emit("  li a%d, %d\n", _m_reg_t_idx - T_MAX,
+				     _variant->value->kind.data.integer.value);
 			else
-			{
-				if (m_yield_end == 0)
-					emit("  li a6, %d\n", value);
-				else if (m_yield_end == 1)
-					emit("  li a7, %d\n", value);
-			}
+				emit("  li a%c, %d\n", '6' + m_yield_end,
+				     _variant->value->kind.data.integer.value);
 		}
 
-		if (reg_t_idx < T_MAX)
-			yield(emit("t%d", reg_t_idx));
-		else if (reg_t_idx < REG_MAX)
-			yield(emit("a%d", reg_t_idx - T_MAX));
+		if (_m_reg_t_idx < T_MAX)
+			yield(emit("t%d", _m_reg_t_idx));
+		else if (_m_reg_t_idx < REG_MAX)
+			yield(emit("a%d", _m_reg_t_idx - T_MAX));
+
+		if (_variant->value->kind.tag != KOOPA_RVT_INTEGER)
+			emit("  lw a%c, %lu(sp)\n", '6' + m_yield_end,
+			     _m_reg_t_sp);
 
 		if (m_yield_end == 0)
-		{
-			if (variant->value->kind.tag != KOOPA_RVT_INTEGER)
-				emit("  lw a6, %lu(sp)\n", reg_t_sp);
 			yield(emit("a6"));
-		}
 		else if (m_yield_end == 1)
-		{
-			if (variant->value->kind.tag != KOOPA_RVT_INTEGER)
-				emit("  lw a7, %lu(sp)\n", reg_t_sp);
 			yield(emit("a7"));
-		}
 		break;
 	case INDEX:
-		if (variant->index < T_MAX)
-			yield(emit("t%d", variant->index));
-		else if (variant->index < REG_MAX)
-			yield(emit("a%d", variant->index - T_MAX));
+		if (_variant->index < T_MAX)
+			yield(emit("t%d", _variant->index));
+		else if (_variant->index < REG_MAX)
+			yield(emit("a%d", _variant->index - T_MAX));
 
+		emit("  lw a%c, %lu(sp)\n", '6' + m_yield_end, _variant_sp);
 		if (m_yield_end == 0)
-		{
-			emit("  lw a6, %lu(sp)\n", variant_sp);
 			yield(emit("a6"));
-		}
 		else if (m_yield_end == 1)
-		{
-			emit("  lw a7, %lu(sp)\n", variant_sp);
 			yield(emit("a7"));
-		}
 		break;
 	case OFFSET:
-		yield(emit("%u(sp)", variant->offset));
+		yield(emit("%u(sp)", _variant->offset));
 		break;
 	default:
 		panic("value is NIL");
@@ -229,6 +224,8 @@ static void inst(const char *op, ...)
 
 	oper(op, 1);
 }
+
+/* */
 
 /* declarations */
 static struct variant_t raw_value(koopa_raw_value_t raw);
@@ -319,8 +316,8 @@ static void raw_kind_return(koopa_raw_return_t *ret)
 static void raw_kind_binary(koopa_raw_binary_t *binary)
 {
 	/* evaluate rhs first, since `m_reg_t_idx` works just like a stack */
-	struct variant_t rhs = raw_value(binary->rhs);
 	struct variant_t lhs = raw_value(binary->lhs);
+	struct variant_t rhs = raw_value(binary->rhs);
 
 	switch (binary->op)
 	{
@@ -521,6 +518,8 @@ static void raw_basic_block(koopa_raw_basic_block_t raw)
 	raw_slice(&raw->params);
 	// raw_slice(&raw->used_by);
 	raw_slice(&raw->insts);
+	
+	m_inst_idx = -1;
 }
 
 static void raw_function(koopa_raw_function_t raw)
@@ -532,7 +531,7 @@ static void raw_function(koopa_raw_function_t raw)
 		emit("  .globl main\n");
 	emit("%s:\n", raw->name + 1);
 
-	// TODO: really ugly, should be refactored
+	// TODO really ugly, should be refactored
 	function_prologue(raw);
 
 	raw_type(raw->ty);

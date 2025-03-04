@@ -72,7 +72,7 @@ int main(int argc, char **argv)
 	if (error)
 		return 1;
 
-#if 0
+#if 1
 	/* print AST */
 	printf("======= Abstract syntax tree (AST)\n");
 	ast_print(comp_unit);

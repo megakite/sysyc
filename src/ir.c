@@ -1,7 +1,10 @@
+#undef _FORTIFY_SOURCE
+
 #pragma clang diagnostic ignored \
 	"-Wincompatible-pointer-types-discards-qualifiers"
 
 #include <assert.h>
+#include <setjmp.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -14,7 +17,13 @@
 /* state variables */
 static koopa_raw_basic_block_t m_curr_basic_block;
 static koopa_raw_function_t m_curr_function;
+static koopa_raw_program_t *m_curr_program;
+
+static koopa_raw_basic_block_t m_curr_cond;
+static koopa_raw_basic_block_t m_curr_end;
+
 static size_t m_mangle_idx;
+static bool m_returned;
 
 /* accessor decl.s */
 static koopa_raw_program_t CompUnit(const struct node_t *node);
@@ -49,6 +58,12 @@ static koopa_raw_value_t ConstDefList(const struct node_t *node);
 static void VarDefList(const struct node_t *node);
 static void BlockItemList(const struct node_t *node);
 
+static void FuncDefList(const struct node_t *node);
+static void FuncFParamsList(const struct node_t *node);
+static void FuncFParam(const struct node_t *node);
+static void FuncRParamsList(const struct node_t *node);
+static void FuncRParam(const struct node_t *node);
+
 /* tool functions */
 static char *mangle(char *ident)
 {
@@ -68,13 +83,16 @@ static void try_append(koopa_raw_slice_t *slice, koopa_raw_value_t inst)
 {
 	assert(slice->kind == KOOPA_RSIK_VALUE);
 
-	/* truncate all instructions after branching */
+#if 1
+	/* truncate all instructions after branching
+	 * XXX this is definitely not the best solution */
 	koopa_raw_value_t last = slice_back(slice);
 	if (last
 	    && (last->kind.tag == KOOPA_RVT_RETURN
 		|| last->kind.tag == KOOPA_RVT_BRANCH
 		|| last->kind.tag == KOOPA_RVT_JUMP))
 		return;
+#endif
 
 	slice_append(slice, inst);
 }
@@ -138,9 +156,21 @@ static koopa_raw_value_t UnaryExp(const struct node_t *node)
 {
 	assert(node && node->data.kind == AST_UnaryExp);
 
-	/* sole primary expression (fixed point) */
-	if (node->size == 1)
+	switch (node->children[0]->data.kind)
+	{
+	case AST_PrimaryExp:
 		return PrimaryExp(node->children[0]);
+	case AST_IDENT:
+		/* function calls.
+		 * IDENT (LP) [FuncRParams] (RP) */
+		{
+		if (node->size == 2)
+			FuncRParamsList(node->children[1]);
+		}
+		return 0;
+	default:
+		/* fallthrough */;
+	}
 
 	/* otherwise, continguous unary expression */
 	char op_token = node->children[0]->data.value.s[0];
@@ -339,6 +369,8 @@ static void Stmt(const struct node_t *node)
 {
 	assert(node && node->data.kind == AST_Stmt);
 
+	koopa_raw_basic_block_t this_cond = m_curr_cond;
+	koopa_raw_basic_block_t this_end = m_curr_end;
 	koopa_raw_value_t inst;
 	switch (node->children[0]->data.kind)
 	{
@@ -365,17 +397,19 @@ static void Stmt(const struct node_t *node)
 			inst = koopa_raw_return(NULL);
 
 		try_append(&m_curr_basic_block->insts, inst);
+
+		m_returned = true;
 		break;
 	case AST_IF:
 		{
 		koopa_raw_value_t cond = Exp(node->children[1]);
 
 		koopa_raw_basic_block_t true_bb =
-			koopa_raw_basic_block(mangle("then"));
+			koopa_raw_basic_block(mangle("if_then"));
 		koopa_raw_basic_block_t false_bb =
-			koopa_raw_basic_block(mangle("else"));
+			koopa_raw_basic_block(mangle("if_else"));
 		koopa_raw_basic_block_t end_bb =
-			koopa_raw_basic_block(mangle("end"));
+			koopa_raw_basic_block(mangle("if_end"));
 
 		inst = koopa_raw_branch(cond, true_bb, false_bb);
 		try_append(&m_curr_basic_block->insts, inst);
@@ -384,6 +418,9 @@ static void Stmt(const struct node_t *node)
 		m_curr_basic_block = true_bb;
 		// `then` branch always evaluated
 		Stmt(node->children[2]);
+		// FIXME find a more elegant solution to indicate returns inside
+		// if branches with a single statement (i.e. no blocks)
+		m_returned = false;
 		try_append(&m_curr_basic_block->insts, koopa_raw_jump(end_bb));
 		try_append(&true_bb->insts, koopa_raw_jump(end_bb));
 
@@ -393,6 +430,7 @@ static void Stmt(const struct node_t *node)
 		if (node->size == 4)
 		{
 			Stmt(node->children[3]);
+			m_returned = false;
 			try_append(&m_curr_basic_block->insts,
 				   koopa_raw_jump(end_bb));
 		}
@@ -402,9 +440,76 @@ static void Stmt(const struct node_t *node)
 		m_curr_basic_block = end_bb;
 		}
 		break;
+	case AST_WHILE:
+		{
+		koopa_raw_basic_block_t cond_bb =
+			koopa_raw_basic_block(mangle("while_cond"));
+		koopa_raw_basic_block_t body_bb =
+			koopa_raw_basic_block(mangle("while_body"));
+		koopa_raw_basic_block_t end_bb =
+			koopa_raw_basic_block(mangle("while_end"));
+
+		inst = koopa_raw_jump(cond_bb);
+		try_append(&m_curr_basic_block->insts, inst);
+
+		slice_append(&m_curr_function->bbs, cond_bb);
+		m_curr_basic_block = cond_bb;
+		koopa_raw_value_t cond = Exp(node->children[1]);
+		inst = koopa_raw_branch(cond, body_bb, end_bb);
+		try_append(&m_curr_basic_block->insts, inst);
+
+		slice_append(&m_curr_function->bbs, body_bb);
+		m_curr_basic_block = body_bb;
+		/* "push" */
+		m_curr_cond = cond_bb;
+		m_curr_end = end_bb;
+		Stmt(node->children[2]);
+		// FIXME find a more elegant solution
+		m_returned = false;
+		/* "pop" */
+		m_curr_cond = this_cond;
+		m_curr_end = this_end;
+		inst = koopa_raw_jump(cond_bb);
+		try_append(&m_curr_basic_block->insts, inst);
+
+		slice_append(&m_curr_function->bbs, end_bb);
+		m_curr_basic_block = end_bb;
+		}
+		break;
+	case AST_BREAK:
+		{
+		koopa_raw_basic_block_t break_bb =
+			koopa_raw_basic_block(mangle("while_break"));
+		slice_append(&m_curr_function->bbs, break_bb);
+
+		try_append(&m_curr_basic_block->insts,
+			   koopa_raw_jump(m_curr_end));
+		m_curr_basic_block = break_bb;
+		}
+		break;
+	case AST_CONTINUE:
+		{
+		koopa_raw_basic_block_t continue_bb =
+			koopa_raw_basic_block(mangle("while_continue"));
+		slice_append(&m_curr_function->bbs, continue_bb);
+
+		try_append(&m_curr_basic_block->insts,
+			   koopa_raw_jump(m_curr_cond));
+		m_curr_basic_block = continue_bb;
+		}
+		break;
 	default:
 		todo();
 	}
+}
+
+static void FuncDefList(const struct node_t *node)
+{
+	assert(node && node->data.kind == AST_FuncDefList);
+
+	for (int i = node->size - 1; i >= 0; --i)
+		slice_append(&m_curr_program->funcs,
+			     FuncDef(node->children[i]));
 }
 
 static koopa_raw_function_t FuncDef(const struct node_t *node)
@@ -433,11 +538,15 @@ static koopa_raw_program_t CompUnit(const struct node_t *node)
 
 	koopa_raw_program_t ret = {
 		.values = slice_new(0, KOOPA_RSIK_VALUE),
-		.funcs = slice_new(1, KOOPA_RSIK_FUNCTION),
+		.funcs = slice_new(0, KOOPA_RSIK_FUNCTION),
 	};
+	// XXX very dangerous, but we're in fact not rewinding the stack until
+	// traversal of the whole program has been completed, so it shouldn't be
+	// a problem
+	m_curr_program = &ret;
 
 	symbols_enter(g_symbols);
-	ret.funcs.buffer[0] = FuncDef(node->children[0]);
+	FuncDefList(node->children[0]);
 	symbols_dedent(g_symbols);
 
 	return ret;
@@ -524,7 +633,7 @@ static koopa_raw_value_t LVal(const struct node_t *node)
 				koopa_raw_integer(symbol->constant.value);
 		break;
 	case VARIABLE:
-		assert(ret = symbol->variable.raw);
+		assert((ret = symbol->variable.raw));
 		break;
 	default:
 		unreachable();
@@ -545,8 +654,38 @@ static void BlockItemList(const struct node_t *node)
 {
 	assert(node && node->data.kind == AST_BlockItemList);
 
-	for (int i = node->size - 1; i >= 0; --i)
+	for (int i = node->size - 1; i >= 0 && !m_returned; --i)
 		BlockItem(node->children[i]);
+
+	m_returned = false;
+}
+
+static void FuncRParamsList(const struct node_t *node)
+{
+	assert(node && node->data.kind == AST_FuncRParamsList);
+
+	todo();
+}
+
+static void FuncRParam(const struct node_t *node)
+{
+	assert(node && node->data.kind == AST_FuncRParam);
+
+	todo();
+}
+
+static void FuncFParamsList(const struct node_t *node)
+{
+	assert(node && node->data.kind == AST_FuncFParamsList);
+
+	todo();
+}
+
+static void FuncFParam(const struct node_t *node)
+{
+	assert(node && node->data.kind == AST_FuncFParam);
+
+	todo();
 }
 
 /* public defn.s */
