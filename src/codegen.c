@@ -1,4 +1,3 @@
-// WHY DID CLANG DEFAULT THIS TO ON???
 #undef _FORTIFY_SOURCE
 
 #pragma clang diagnostic ignored \
@@ -15,81 +14,37 @@
 #include "codegen.h"
 #include "koopaext.h"
 #include "macros.h"
+#include "yield.h"
 
 /* Optional<Variant<ValuePtr, ValueIndex, StackOffset>> */
 struct variant_t {
 	enum {
-		NIL = 0,
+		NONE = 0,
 		VALUE,
-		INDEX,
-		OFFSET,
+		INST,
+		STACK,
 	} tag;
 	union {
 		koopa_raw_value_t value;
-		uint32_t index;
-		uint32_t offset;
+		uint32_t inst;
+		uint32_t stack;
 	};
 };
 
 /* state variables */
 static FILE *m_output;
-
 static htable_ptru32_t m_ht_insts;
-static htable_ptru32_t m_ht_offsets;
+static htable_ptru32_t m_ht_stacks;
 
 static uint32_t m_var_count;
 static uint32_t m_val_count;
-static int32_t m_stack_offset;
+static int32_t m_stack_stack;
 static int32_t m_inst_idx = -1;
 static int32_t m_reg_t_idx;
 
 /* emitters */
 #define emit(format, ...) \
 	fprintf(m_output, format __VA_OPT__(,) __VA_ARGS__)
-
-/* XXX very, very, very loosely implemented `yield` mechanism */
-static uint8_t m_yield_begin;
-static uint8_t m_yield_end;
-static jmp_buf m_yield[2];
-static jmp_buf m_next[2];
-
-#define r_let(type, name, reg, init)	  \
-	register type name __asm__(#reg); \
-	__asm__("mov %1, %0\n\t"	  \
-		: "=r" (name)		  \
-		: "r" (init))
-
-#define yield(expr)							   \
-	do								   \
-	{								   \
-		assert(m_yield_end < 2);				   \
-		/* FIXME theoretically local variables must be placed into \
-		 * callee-saved registers, since stack will be overwritten \
-		 * after return. see setjmp(3): Undefined Behavior */      \
-		r_let(uint8_t, order, r12, m_yield_end);		   \
-		++m_yield_end;						   \
-		if (setjmp(m_yield[order]) == 1)			   \
-			longjmp(m_next[order], expr);			   \
-		return;							   \
-	}								   \
-	while (false)
-
-#define next()							 \
-	do							 \
-	{							 \
-		if (m_yield_begin == 0 && m_yield_end == 0)	 \
-			break;					 \
-		/* vice versa */				 \
-		r_let(uint8_t, order, r12, m_yield_begin);	 \
-		++m_yield_begin;				 \
-		if (setjmp(m_next[order]) == 0)			 \
-		{						 \
-			if (m_yield_begin == m_yield_end)	 \
-				m_yield_begin = m_yield_end = 0; \
-			longjmp(m_yield[order], 1);		 \
-		}						 \
-	}							 \
-	while (false)
 
 /* register limits */
 #define TMP_REGS 15
@@ -99,37 +54,13 @@ static jmp_buf m_next[2];
 
 /* getters */
 #define m_inst_sp ((m_inst_idx - REG_MAX + m_var_count) * sizeof(uint32_t))
-#define _m_reg_t_sp ((_m_reg_t_idx - REG_MAX + m_var_count) * sizeof(uint32_t))
-#define _variant_sp \
-	((_variant->index - REG_MAX + m_var_count) * sizeof(uint32_t))
+#define reg_t_sp ((reg_t_idx - REG_MAX + m_var_count) * sizeof(uint32_t))
+#define variant_sp ((variant->inst - REG_MAX + m_var_count) * sizeof(uint32_t))
 
-static void oper(const char *op, int times)
+static void oper(const char *op, bool self_repeat)
 {
-	assert(0 <= times && times <= 2);
-
-	switch (times)
+	if (self_repeat)
 	{
-	case 0:
-		emit("  %s ", op);
-		return;
-	case 1:
-		if (m_inst_idx < T_MAX)
-			emit("  %s t%d, ", op, m_inst_idx);
-		else if (m_inst_idx < REG_MAX)
-			emit("  %s a%d, ", op, m_inst_idx - T_MAX);
-		else
-			emit("  %s a6, ", op);
-
-		while (m_yield_end)
-		{
-			next();
-			if (m_yield_end != 0)
-				emit(", ");
-			else
-				emit("\n");
-		}
-		break;
-	case 2:
 		if (m_inst_idx < T_MAX)
 			emit("  %s t%d, t%d\n", op, m_inst_idx, m_inst_idx);
 		else if (m_inst_idx < REG_MAX)
@@ -137,7 +68,24 @@ static void oper(const char *op, int times)
 			     m_inst_idx - T_MAX);
 		else
 			emit("  %s a6, a6\n", op);
-		break;
+	}
+	else
+	{
+		if (m_inst_idx < T_MAX)
+			emit("  %s t%d, ", op, m_inst_idx);
+		else if (m_inst_idx < REG_MAX)
+			emit("  %s a%d, ", op, m_inst_idx - T_MAX);
+		else
+			emit("  %s a6, ", op);
+
+		while (m_yield_end != 0)
+		{
+			next();
+			if (m_yield_end != 0)
+				emit(", ");
+			else
+				emit("\n");
+		}
 	}
 
 	if (m_inst_idx >= REG_MAX)
@@ -146,64 +94,62 @@ static void oper(const char *op, int times)
 
 static void opnd(struct variant_t *variant)
 {
-	/* FIXME these actually have no effect at all...unless we use inline asm
-	 * to call each `yield` manually with `r13` and `r14` as parameters */
-	r_let(int32_t, _m_reg_t_idx, r13, m_reg_t_idx);
-	r_let(struct variant_t *, _variant, r14, variant);
+	int32_t reg_t_idx = def(m_reg_t_idx);
+	def(variant);
 
-	switch (_variant->tag)
+	switch (variant->tag)
 	{
 	case VALUE:
 		++m_reg_t_idx;
 
-		/* special case for immediate */
-		if (_variant->value->kind.tag == KOOPA_RVT_INTEGER)
+		if (variant->value->kind.tag == KOOPA_RVT_INTEGER)
 		{
-			if (_variant->value->kind.data.integer.value == 0)
+			if (variant->value->kind.data.integer.value == 0)
 				yield(emit("x0"));
 
-			if (_m_reg_t_idx < T_MAX)
-				emit("  li t%d, %d\n", _m_reg_t_idx, 
-				     _variant->value->kind.data.integer.value);
-			else if (_m_reg_t_idx < REG_MAX)
-				emit("  li a%d, %d\n", _m_reg_t_idx - T_MAX,
-				     _variant->value->kind.data.integer.value);
+			if (reg_t_idx < T_MAX)
+				emit("  li t%d, %d\n", reg_t_idx,
+				     variant->value->kind.data.integer.value);
+			else if (reg_t_idx < REG_MAX)
+				emit("  li a%d, %d\n", reg_t_idx - T_MAX,
+				     variant->value->kind.data.integer.value);
 			else
 				emit("  li a%c, %d\n", '6' + m_yield_end,
-				     _variant->value->kind.data.integer.value);
+				     variant->value->kind.data.integer.value);
 		}
 
-		if (_m_reg_t_idx < T_MAX)
-			yield(emit("t%d", _m_reg_t_idx));
-		else if (_m_reg_t_idx < REG_MAX)
-			yield(emit("a%d", _m_reg_t_idx - T_MAX));
+		if (reg_t_idx < T_MAX)
+			yield(emit("t%d", use(m_reg_t_idx)));
+		else if (reg_t_idx < REG_MAX)
+			yield(emit("a%d", use(m_reg_t_idx) - T_MAX));
 
-		if (_variant->value->kind.tag != KOOPA_RVT_INTEGER)
+		if (variant->value->kind.tag != KOOPA_RVT_INTEGER)
 			emit("  lw a%c, %lu(sp)\n", '6' + m_yield_end,
-			     _m_reg_t_sp);
+			     reg_t_sp);
 
 		if (m_yield_end == 0)
 			yield(emit("a6"));
 		else if (m_yield_end == 1)
 			yield(emit("a7"));
 		break;
-	case INDEX:
-		if (_variant->index < T_MAX)
-			yield(emit("t%d", _variant->index));
-		else if (_variant->index < REG_MAX)
-			yield(emit("a%d", _variant->index - T_MAX));
+	case INST:
+		if (variant->inst < T_MAX)
+			yield(emit("t%d", use(variant)->inst));
+		else if (variant->inst < REG_MAX)
+			yield(emit("a%d", use(variant)->inst - T_MAX));
 
-		emit("  lw a%c, %lu(sp)\n", '6' + m_yield_end, _variant_sp);
+		emit("  lw a%c, %lu(sp)\n", '6' + m_yield_end, variant_sp);
+
 		if (m_yield_end == 0)
 			yield(emit("a6"));
 		else if (m_yield_end == 1)
 			yield(emit("a7"));
 		break;
-	case OFFSET:
-		yield(emit("%u(sp)", _variant->offset));
+	case STACK:
+		yield(emit("%u(sp)", use(variant)->stack));
 		break;
 	default:
-		panic("value is NIL");
+		panic("value is NONE");
 	}
 }
 
@@ -222,10 +168,8 @@ static void inst(const char *op, ...)
 		opnd(arg);
 	}
 
-	oper(op, 1);
+	oper(op, false);
 }
-
-/* */
 
 /* declarations */
 static struct variant_t raw_value(koopa_raw_value_t raw);
@@ -242,14 +186,14 @@ static void reserve_stack(void *block)
 		koopa_raw_value_t value = _block->insts.buffer[i];
 		if (value->ty->tag == KOOPA_RTT_POINTER)
 		{
-			htable_ptru32_insert(m_ht_offsets, value,
-					     -m_stack_offset);
+			htable_ptru32_insert(m_ht_stacks, value,
+					     -m_stack_stack);
 			++m_var_count;
-			m_stack_offset -= sizeof(int32_t);
+			m_stack_stack -= sizeof(int32_t);
 		}
 		else if (value->ty->tag == KOOPA_RTT_INT32)
 			if (++m_val_count + m_var_count > REG_MAX)
-				m_stack_offset -= sizeof(int32_t);
+				m_stack_stack -= sizeof(int32_t);
 	}
 }
 
@@ -258,8 +202,8 @@ static void function_prologue(koopa_raw_function_t function)
 {
 	slice_iter(&function->bbs, reserve_stack);
 	// align to 16 bytes
-	m_stack_offset &= -16;
-	emit("  addi sp, sp, %d\n", m_stack_offset);
+	m_stack_stack &= -16;
+	emit("  addi sp, sp, %d\n", m_stack_stack);
 }
 
 /* kind generators */
@@ -275,7 +219,7 @@ static void raw_kind_branch(koopa_raw_branch_t *branch)
 	struct variant_t cond = raw_value(branch->cond);
 
 	opnd(&cond);
-	oper("bnez", 0);
+	emit("  bnez ");
 	next();
 	emit(", %s\n", branch->true_bb->name + 1);
 	emit("  j %s\n", branch->false_bb->name + 1);
@@ -293,7 +237,7 @@ static void raw_kind_store(koopa_raw_store_t *store)
 
 	opnd(&value);
 	opnd(&dest);
-	oper("sw", 0);
+	emit("  sw ");
 	next();
 	emit(", ");
 	next();
@@ -305,17 +249,15 @@ static void raw_kind_return(koopa_raw_return_t *ret)
 	struct variant_t value = raw_value(ret->value);
 
 	opnd(&value);
-	oper("mv", 0);
-	emit("a0, ");
+	emit("  mv a0, ");
 	next();
 	emit("\n");
-	emit("  addi sp, sp, %d\n", -m_stack_offset);
+	emit("  addi sp, sp, %d\n", -m_stack_stack);
 	emit("  ret\n");
 }
 
 static void raw_kind_binary(koopa_raw_binary_t *binary)
 {
-	/* evaluate rhs first, since `m_reg_t_idx` works just like a stack */
 	struct variant_t lhs = raw_value(binary->lhs);
 	struct variant_t rhs = raw_value(binary->rhs);
 
@@ -414,35 +356,35 @@ static void raw_slice(const koopa_raw_slice_t *slice)
 	}
 }
 
-/* weird return type... i wonder if there's a better way to backtrack.
- * currently if we're not using `struct variant_t` we'll have to call
- * `htable_lookup()` twice: first in this function, then in `opnd()`. */
+/* weird return type... i wonder if there's a better way to backtrack. currently
+ * if we're not using `struct variant_t` we'll have to call `htable_lookup()`
+ * twice: first in this function, then in `opnd()`. */
 static struct variant_t raw_value(koopa_raw_value_t raw)
 {
 	if (!raw)
-		return (struct variant_t) { .tag = NIL, };
+		return (struct variant_t) { .tag = NONE, };
 
 	if (raw->kind.tag == KOOPA_RVT_ALLOC)
 	{
-		uint32_t *offset_it = htable_lookup(m_ht_offsets, raw);
-		assert(offset_it);
+		uint32_t *stack_it = htable_lookup(m_ht_stacks, raw);
+		assert(stack_it);
 
 		return (struct variant_t) {
-			.tag = OFFSET,
-			.offset = *offset_it,
+			.tag = STACK,
+			.stack = *stack_it,
 		};
 	}
 
 	uint32_t *value_it = htable_lookup(m_ht_insts, raw);
 	if (value_it)
-		return (struct variant_t) { .tag = INDEX, .index = *value_it, };
+		return (struct variant_t) { .tag = INST, .inst = *value_it, };
 
 	raw_type(raw->ty);
 
 	switch (raw->kind.tag)
 	{
 	case KOOPA_RVT_INTEGER:
-		// raw_kind_integer(&raw->kind.data.integer);
+		/* do nothing */
 		break;
 	case KOOPA_RVT_ZERO_INIT:
 		todo();
@@ -527,8 +469,8 @@ static void raw_function(koopa_raw_function_t raw)
 	if (!raw)
 		return;
 
-	if (strcmp(raw->name, "@main") == 0)
-		emit("  .globl main\n");
+	// every function is global (`extern`al)
+	emit("  .globl %s\n", raw->name + 1);
 	emit("%s:\n", raw->name + 1);
 
 	// TODO really ugly, should be refactored
@@ -538,7 +480,7 @@ static void raw_function(koopa_raw_function_t raw)
 	raw_slice(&raw->params);
 	raw_slice(&raw->bbs);
 
-	m_stack_offset = 0;
+	m_stack_stack = 0;
 }
 
 static void raw_type(koopa_raw_type_t raw)
@@ -571,7 +513,7 @@ void codegen(const koopa_raw_program_t *program, FILE *output)
 
 	m_output = output;
 	m_ht_insts = htable_ptru32_new();
-	m_ht_offsets = htable_ptru32_new();
+	m_ht_stacks = htable_ptru32_new();
 
 #if 0
 	koopa_raw_slice_t *values = &program->values;
@@ -582,6 +524,6 @@ void codegen(const koopa_raw_program_t *program, FILE *output)
 	emit("  .text\n");
 	raw_slice(funcs);
 
-	htable_ptru32_delete(m_ht_offsets);
+	htable_ptru32_delete(m_ht_stacks);
 	htable_ptru32_delete(m_ht_insts);
 }

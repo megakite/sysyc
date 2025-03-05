@@ -11,6 +11,15 @@
 #include "symbols.h"
 #include "macros.h"
 
+/* Optional<int32_t> */
+struct option_t {
+	enum {
+		NONE = 0,
+		SOME,
+	} tag;
+	int32_t value;
+};
+
 /* state variables */
 static bool m_constexpr;
 static bool m_while;

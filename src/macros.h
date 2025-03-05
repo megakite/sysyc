@@ -15,25 +15,25 @@
 #define KiB * 1024
 #define MiB * 1024 * 1024
 
-#define todo()							\
-	do							\
-	{							\
-		fprintf(stderr, "todo: %s\n", __func__);	\
-		assert(false /* todo */);			\
+#define todo()						 \
+	do						 \
+	{						 \
+		fprintf(stderr, "todo: %s\n", __func__); \
+		assert(false /* todo */);		 \
 	} while (false)
 
-#define unimplemented()							\
-	do								\
-	{								\
-		fprintf(stderr, "unimplemented: %s\n", __func__);	\
-		assert(false /* unimplemented */);			\
+#define unimplemented()						  \
+	do							  \
+	{							  \
+		fprintf(stderr, "unimplemented: %s\n", __func__); \
+		assert(false /* unimplemented */);		  \
 	} while (false)
 
-#define panic(msg)							\
-	do								\
-	{								\
-		fprintf(stderr, "panic: %s from %s\n", msg, __func__);	\
-		assert(false /* panic */);				\
+#define panic(msg)						       \
+	do							       \
+	{							       \
+		fprintf(stderr, "panic: %s from %s\n", msg, __func__); \
+		assert(false /* panic */);			       \
 	} while (false)
 
 #define unreachable()						\

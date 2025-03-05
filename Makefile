@@ -11,7 +11,8 @@ FB_EXT := .cpp
 endif
 
 # Flags
-CFLAGS := -Wall -Wextra -std=c11 -D_POSIX_C_SOURCE=200809L -fsanitize=address
+CFLAGS := -Wall -Wextra -std=c11 -D_POSIX_C_SOURCE=200809L -fsanitize=address \
+	  -fno-stack-protector # otherwise `longjmp()` will break
 CXXFLAGS := -Wall -Wno-register -std=c++17
 FFLAGS :=
 BFLAGS := -d
@@ -23,8 +24,8 @@ ifeq ($(DEBUG), 0)
 CFLAGS += -O2
 CXXFLAGS += -O2
 else
-CFLAGS += -g -Og
-CXXFLAGS += -g -Og
+CFLAGS += -g -O0
+CXXFLAGS += -g -O0
 endif
 
 # Compilers

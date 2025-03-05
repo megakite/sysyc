@@ -203,8 +203,6 @@ void _debug_raw_basic_block(koopa_raw_basic_block_t raw)
 	clog("}, ");
 }
 
-/* TODO use this regex to replace with shallow visits
- * %s/clog("\(.*\): ");\n\t\t_debug_raw_.*(\(.*\));/LOG("\1: %p", \2); */
 void _debug_raw_value(koopa_raw_value_t raw)
 {
 	if (!raw)

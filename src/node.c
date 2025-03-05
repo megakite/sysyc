@@ -14,8 +14,6 @@ struct node_t *node_new(struct node_data_t data, int capacity)
 	return new;
 }
 
-/* Add a child to given root.
- * @return The possibly reallocated root. */
 struct node_t *node_add_child(struct node_t *root, struct node_t *node)
 {
 	if (!root)
