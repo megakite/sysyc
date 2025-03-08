@@ -12,9 +12,9 @@
  *          scopes | [0] | [0]-. ... | [0] |   | [0] |
  *         (queue) +--\--+-----+\    +--/--+   +--|--+
  *                     \ | [1] | \     /          V
- *                      \+--|--+  \   /          NULL (just a block)
+ *                      \+--|--+  \   /         .link = NULL (just a block)
  *                       \  |      \ /
- *          last_item     '-|-------/-----------.
+ *            .last       '-|-------/-----------.
  *              |           |      / \           \
  *              |   .-------------'   \           \
  * table        |  /        |          \           \
@@ -66,7 +66,6 @@ struct _symbols_t {
 	struct vector_ptr_t *levels;
 
 	/* state variables */
-	struct _htable_strsym_item_t *last_item;
 	uint16_t depth;
 	int16_t level;
 };
@@ -103,7 +102,8 @@ struct symbol_t symbol_variable(void)
 	return symbol;
 }
 
-struct symbol_t symbol_function(uint32_t params, enum symbol_type_e type)
+struct symbol_t symbol_function(struct vector_typ_t *params,
+				enum symbol_type_e type)
 {
 	struct symbol_t symbol = {
 		.meta = {
@@ -113,19 +113,24 @@ struct symbol_t symbol_function(uint32_t params, enum symbol_type_e type)
 		.tag = FUNCTION,
 		.function = {
 			.raw = NULL,
-			.params = params,
+			.params = /* move */ params,
 			.type = type,
 		},
 	};
 	return symbol;
 }
 
+struct pair_t {
+	struct _htable_strsym_item_t *link;
+	struct _htable_strsym_item_t *last;
+};
+
 /* private class Layer; basically a queue */
 struct level_t {
 	uint16_t begin;
 	uint16_t end;
 	int16_t scope;
-	struct _htable_strsym_item_t *scopes[];
+	struct pair_t scopes[];
 };
 
 static struct level_t *level_new(void)
@@ -153,7 +158,8 @@ static struct level_t *level_offer(struct level_t *level,
 	level->scope = level->end++;
 	struct level_t *new = realloc(level, sizeof(*new) +
 				      sizeof(*new->scopes) * level->end);
-	new->scopes[new->scope] = item;
+	new->scopes[new->scope] = (struct pair_t) { .link = item,
+						    .last = item, };
 
 	return new;
 }
@@ -163,12 +169,12 @@ static struct _htable_strsym_item_t *level_poll(struct level_t *level)
 	if (level_empty(level))
 		return NULL;
 
-	return level->scopes[level->begin++];
+	return level->scopes[level->begin++].link;
 }
 
 static struct _htable_strsym_item_t *level_at(const struct level_t *level)
 {
-	return level->scopes[level->scope];
+	return level->scopes[level->scope].link;
 }
 
 /* exported methods */
@@ -177,7 +183,6 @@ symbols_t symbols_new(void)
 	struct _symbols_t *new = malloc(sizeof(*new));
 	new->table = htable_strsym_new();
 	new->levels = vector_ptr_new(1);
-	new->last_item = NULL;
 	new->depth = 0;
 	new->level = -1;
 
@@ -245,15 +250,16 @@ struct symbol_t *symbols_add(symbols_t symbols, char *ident,
 			     struct symbol_t symbol)
 {
 	struct level_t *level = symbols->levels->data[symbols->level];
+	struct pair_t *scope = &level->scopes[level->scope];
 	struct symbol_t *new = htable_insert(symbols->table, ident, symbol);
 	struct _htable_strsym_item_t *new_item =
 		container_of(new, struct _htable_strsym_item_t, value);
 
-	if (!symbols->last_item)
-		level->scopes[level->scope] = new_item;
+	if (!scope->last)
+		scope->link = new_item;
 	else
-		symbols->last_item->link = new_item;
-	symbols->last_item = new_item;
+		scope->last->link = new_item;
+	scope->last = new_item;
 
 	return new;
 }
@@ -277,13 +283,11 @@ void symbols_indent(symbols_t symbols)
 		vector_ptr_push(symbols->levels, level_new());
 	}
 
-	/* this is what i call "the weird pattern" when we use flexible array
+ 	/* this is what i call "the weird pattern" when we use flexible array
 	 * members: we need another level of indirection */
 	struct level_t **level =
 		(struct level_t **)&symbols->levels->data[symbols->level];
 	*level = level_offer(*level, NULL);
-
-	symbols->last_item = NULL;
 }
 
 void symbols_leave(symbols_t symbols)
@@ -332,6 +336,10 @@ void symbols_dedent(symbols_t symbols)
 			}
 			while (*prev != this);
 			*prev = *it;
+
+			/* FIXME ugly */
+			if (this->value.tag == FUNCTION)
+				vector_typ_delete(this->value.function.params);
 			free(this);
 		}
 

@@ -520,6 +520,7 @@ static void raw_kind_call(const koopa_raw_call_t *call)
 
 static void raw_kind_func_arg_ref(const koopa_raw_func_arg_ref_t *func_arg_ref)
 {
+	(void) func_arg_ref;
 }
 
 /* weird return type... i wonder if there's a better way to backtrack. currently

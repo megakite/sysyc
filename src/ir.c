@@ -66,6 +66,83 @@ static void FuncRParamsList(const struct node_t *node);
 static koopa_raw_value_t FuncRParam(const struct node_t *node);
 
 /* tool functions */
+static void generate_lib_funcs(void)
+{
+	koopa_raw_function_t getint =
+		koopa_raw_function(
+			koopa_raw_type_function(koopa_raw_type_int32()),
+			"getint"
+		);
+
+	koopa_raw_function_t getch =
+		koopa_raw_function(
+			koopa_raw_type_function(koopa_raw_type_int32()),
+			"getch"
+		);
+
+	koopa_raw_function_t getarray =
+		koopa_raw_function(
+			koopa_raw_type_function(koopa_raw_type_int32()),
+			"getarray"
+		);
+	slice_append(&getarray->ty->data.function.params,
+		     koopa_raw_type_pointer(koopa_raw_type_int32()));
+
+	koopa_raw_function_t putint =
+		koopa_raw_function(
+			koopa_raw_type_function(koopa_raw_type_unit()),
+			"putint"
+		);
+	slice_append(&putint->ty->data.function.params, koopa_raw_type_int32());
+
+	koopa_raw_function_t putch =
+		koopa_raw_function(
+			koopa_raw_type_function(koopa_raw_type_unit()),
+			"putch"
+		);
+	slice_append(&putch->ty->data.function.params, koopa_raw_type_int32());
+
+	koopa_raw_function_t putarray =
+		koopa_raw_function(
+			koopa_raw_type_function(koopa_raw_type_unit()),
+			"putarray"
+		);
+	slice_append(&putarray->ty->data.function.params,
+		     koopa_raw_type_int32());
+	slice_append(&putarray->ty->data.function.params,
+		     koopa_raw_type_pointer(koopa_raw_type_int32()));
+
+	koopa_raw_function_t starttime =
+		koopa_raw_function(
+			koopa_raw_type_function(koopa_raw_type_unit()),
+			"starttime"
+		);
+
+	koopa_raw_function_t stoptime =
+		koopa_raw_function(
+			koopa_raw_type_function(koopa_raw_type_unit()),
+			"stoptime"
+		);
+
+	slice_append(&m_curr_program->funcs, getint);
+	slice_append(&m_curr_program->funcs, getch);
+	slice_append(&m_curr_program->funcs, getarray);
+	slice_append(&m_curr_program->funcs, putint);
+	slice_append(&m_curr_program->funcs, putch);
+	slice_append(&m_curr_program->funcs, putarray);
+	slice_append(&m_curr_program->funcs, starttime);
+	slice_append(&m_curr_program->funcs, stoptime);
+
+	symbols_get(g_symbols, "getint")->function.raw = getint;
+	symbols_get(g_symbols, "getch")->function.raw = getch;
+	symbols_get(g_symbols, "getarray")->function.raw = getarray;
+	symbols_get(g_symbols, "putint")->function.raw = putint;
+	symbols_get(g_symbols, "putch")->function.raw = putch;
+	symbols_get(g_symbols, "putarray")->function.raw = putarray;
+	symbols_get(g_symbols, "starttime")->function.raw = starttime;
+	symbols_get(g_symbols, "stoptime")->function.raw = stoptime;
+}
+
 static char *mangle(char *ident)
 {
 	if (!ident)
@@ -519,48 +596,6 @@ static void Stmt(const struct node_t *node)
 static void FuncDefList(const struct node_t *node)
 {
 	assert(node && node->data.kind == AST_FuncDefList);
-
-	slice_append(&m_curr_program->funcs,
-		koopa_raw_function(
-			koopa_raw_type_function(koopa_raw_type_int32()),
-			"getint"
-		));
-	slice_append(&m_curr_program->funcs,
-		koopa_raw_function(
-			koopa_raw_type_function(koopa_raw_type_int32()),
-			"getch"
-		));
-	slice_append(&m_curr_program->funcs,
-		koopa_raw_function(
-			koopa_raw_type_function(koopa_raw_type_int32()),
-			"getarray"
-		));
-	slice_append(&m_curr_program->funcs,
-		koopa_raw_function(
-			koopa_raw_type_function(koopa_raw_type_int32()),
-			"putint"
-		));
-	slice_append(&m_curr_program->funcs,
-		koopa_raw_function(
-			koopa_raw_type_function(koopa_raw_type_int32()),
-			"putch"
-		));
-	slice_append(&m_curr_program->funcs,
-		koopa_raw_function(
-			koopa_raw_type_function(koopa_raw_type_int32()),
-			"putarray"
-		));
-	slice_append(&m_curr_program->funcs,
-		koopa_raw_function(
-			koopa_raw_type_function(koopa_raw_type_int32()),
-			"starttime"
-		));
-	slice_append(&m_curr_program->funcs,
-		koopa_raw_function(
-			koopa_raw_type_function(koopa_raw_type_int32()),
-			"stoptime"
-		));
-
 	for (int i = node->size - 1; i >= 0; --i)
 		slice_append(&m_curr_program->funcs,
 			     FuncDef(node->children[i]));
@@ -618,6 +653,8 @@ static koopa_raw_program_t CompUnit(const struct node_t *node)
 	// traversal of the whole program has been completed, so it shouldn't be
 	// a problem for now
 	m_curr_program = &ret;
+
+	generate_lib_funcs();
 
 	FuncDefList(node->children[0]);
 

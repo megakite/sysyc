@@ -19,6 +19,7 @@ enum symbol_tag_e {
 enum symbol_type_e {
 	VOID = 0,
 	INT,
+	POINTER,
 };
 
 struct symbol_meta_t {
@@ -39,7 +40,8 @@ struct symbol_t {
 		} variable;
 		struct {
 			koopa_raw_function_t raw;
-			uint32_t params;
+			// TODO ima be a lil lazy here
+			struct vector_typ_t *params;
 			enum symbol_type_e type;
 		} function;
 	};
@@ -48,7 +50,8 @@ struct symbol_t {
 /* ctor. of symbols */
 struct symbol_t symbol_constant(int32_t value);
 struct symbol_t symbol_variable(void);
-struct symbol_t symbol_function(uint32_t params, enum symbol_type_e type);
+struct symbol_t symbol_function(struct vector_typ_t *params,
+				enum symbol_type_e type);
 
 typedef struct _symbols_t *symbols_t;
 

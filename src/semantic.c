@@ -10,6 +10,7 @@
 #include "semantic.h"
 #include "symbols.h"
 #include "macros.h"
+#include "vector.h"
 
 /* Optional<int32_t> */
 struct option_t {
@@ -54,7 +55,7 @@ static int32_t PrimaryExp(const struct node_t *node);
 
 static void Decl(const struct node_t *node);
 static void ConstDecl(const struct node_t *node);
-static void BType(const struct node_t *node);
+static enum symbol_type_e BType(const struct node_t *node);
 static void ConstDef(const struct node_t *node);
 static int32_t ConstInitVal(const struct node_t *node);
 static void VarDecl(const struct node_t *node);
@@ -71,8 +72,8 @@ static void VarDefList(const struct node_t *node);
 static void BlockItemList(const struct node_t *node);
 
 static void FuncDefList(const struct node_t *node);
-static uint32_t FuncFParamsList(const struct node_t *node);
-static void FuncFParam(const struct node_t *node);
+static struct vector_typ_t *FuncFParamsList(const struct node_t *node);
+static enum symbol_type_e FuncFParam(const struct node_t *node);
 static void FuncRParamsList(const struct node_t *node);
 static void FuncRParam(const struct node_t *node);
 
@@ -92,8 +93,9 @@ static void FuncDef(const struct node_t *node)
 
 	char *name = node->children[1]->data.value.s;
 
+	struct symbol_t *it;
 	struct view_t view = symbols_lookup(g_symbols, name);
-	for (struct symbol_t *it = view.begin; it; it = view.next(&view))
+	while ((it = view.next(&view)))
 		if (symbols_here(g_symbols, it))
 			error("Redefinition of function: `%s`", name);
 
@@ -116,14 +118,18 @@ static void FuncDefList(const struct node_t *node)
 	assert(node && node->data.kind == AST_FuncDefList);
 	m_this_node = node;
 
-	symbols_add(g_symbols, "getint", symbol_function(0, INT));
-	symbols_add(g_symbols, "getch", symbol_function(0, INT));
-	symbols_add(g_symbols, "getarray", symbol_function(1, INT));
-	symbols_add(g_symbols, "putint", symbol_function(1, VOID));
-	symbols_add(g_symbols, "putch", symbol_function(1, VOID));
-	symbols_add(g_symbols, "putarray", symbol_function(2, VOID));
-	symbols_add(g_symbols, "starttime", symbol_function(0, VOID));
-	symbols_add(g_symbols, "stoptime", symbol_function(0, VOID));
+	symbols_add(g_symbols, "getint", symbol_function(NULL, INT));
+	symbols_add(g_symbols, "getch", symbol_function(NULL, INT));
+	symbols_add(g_symbols, "getarray",
+		    symbol_function(vector_typ_init(1, POINTER), INT));
+	symbols_add(g_symbols, "putint",
+		    symbol_function(vector_typ_init(1, INT), VOID));
+	symbols_add(g_symbols, "putch",
+		    symbol_function(vector_typ_init(1, INT), VOID));
+	symbols_add(g_symbols, "putarray",
+		    symbol_function(vector_typ_init(2, INT, POINTER), VOID));
+	symbols_add(g_symbols, "starttime", symbol_function(NULL, VOID));
+	symbols_add(g_symbols, "stoptime", symbol_function(NULL, VOID));
 
 	for (int i = node->size - 1; i >= 0; --i)
 		FuncDef(node->children[i]);
@@ -392,13 +398,17 @@ static void ConstDecl(const struct node_t *node)
 	m_constexpr = false;
 }
 
-static void BType(const struct node_t *node)
+static enum symbol_type_e BType(const struct node_t *node)
 {
 	assert(node && node->data.kind == AST_BType);
 	m_this_node = node;
 
-	if (strcmp(node->children[0]->data.value.s, "int") != 0)
-		error("Type of variable must be `int`");
+	if (strcmp(node->children[0]->data.value.s, "void") == 0)
+		error("Incomplete type not supported");
+	if (strcmp(node->children[0]->data.value.s, "int") == 0)
+		return INT;
+
+	todo();
 }
 
 static void ConstDef(const struct node_t *node)
@@ -522,25 +532,29 @@ static void FuncRParam(const struct node_t *node)
 	Exp(node->children[0]);
 }
 
-static uint32_t FuncFParamsList(const struct node_t *node)
+static struct vector_typ_t *FuncFParamsList(const struct node_t *node)
 {
 	assert(node && node->data.kind == AST_FuncFParamsList);
 	m_this_node = node;
 
-	for (int i = node->size - 1; i >= 0; --i)
-		FuncFParam(node->children[i]);
+	struct vector_typ_t *vec = vector_typ_new(node->size);
 
-	return node->size;
+	for (int i = node->size - 1; i >= 0; --i)
+		vector_typ_push(vec, FuncFParam(node->children[i]));
+
+	return vec;
 }
 
-static void FuncFParam(const struct node_t *node)
+static enum symbol_type_e FuncFParam(const struct node_t *node)
 {
 	assert(node && node->data.kind == AST_FuncFParam);
 	m_this_node = node;
 
-	BType(node->children[0]);
+	enum symbol_type_e type = BType(node->children[0]);
 	char *ident = node->children[1]->data.value.s;
 	symbols_add(g_symbols, ident, symbol_variable());
+
+	return type;
 }
 
 void semantic(const struct node_t *comp_unit)
