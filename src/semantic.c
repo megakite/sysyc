@@ -82,9 +82,7 @@ static void CompUnit(const struct node_t *node)
 	assert(node && node->data.kind == AST_CompUnit);
 	m_this_node = node;
 
-	symbols_indent(g_symbols);
 	FuncDefList(node->children[0]);
-	symbols_leave(g_symbols);
 }
 
 static void FuncDef(const struct node_t *node)
@@ -99,18 +97,33 @@ static void FuncDef(const struct node_t *node)
 		if (symbols_here(g_symbols, it))
 			error("Redefinition of function: `%s`", name);
 
-	uint32_t params = (node->size == 4) ? FuncFParamsList(node->children[3])
-					    : 0;
 	enum symbol_type_e type = FuncType(node->children[0]);
-	symbols_add(g_symbols, name, symbol_function(params, type));
-
-	Block(node->children[2]);
+	struct symbol_t *symbol = symbols_add(g_symbols, name,
+					      symbol_function(0, type));
+	symbols_indent(g_symbols);
+	if (node->size == 4)
+	{
+		symbol->function.params = FuncFParamsList(node->children[2]);
+		Block(node->children[3]);
+	}
+	else
+		Block(node->children[2]);
+	symbols_leave(g_symbols);
 }
 
 static void FuncDefList(const struct node_t *node)
 {
 	assert(node && node->data.kind == AST_FuncDefList);
 	m_this_node = node;
+
+	symbols_add(g_symbols, "getint", symbol_function(0, INT));
+	symbols_add(g_symbols, "getch", symbol_function(0, INT));
+	symbols_add(g_symbols, "getarray", symbol_function(1, INT));
+	symbols_add(g_symbols, "putint", symbol_function(1, VOID));
+	symbols_add(g_symbols, "putch", symbol_function(1, VOID));
+	symbols_add(g_symbols, "putarray", symbol_function(2, VOID));
+	symbols_add(g_symbols, "starttime", symbol_function(0, VOID));
+	symbols_add(g_symbols, "stoptime", symbol_function(0, VOID));
 
 	for (int i = node->size - 1; i >= 0; --i)
 		FuncDef(node->children[i]);
@@ -126,7 +139,7 @@ static enum symbol_type_e FuncType(const struct node_t *node)
 	if (strcmp(type, "int") == 0)
 		return INT;
 	if (strcmp(type, "void") == 0)
-		todo();
+		return VOID;
 
 	panic("unknown FuncType");
 }
@@ -293,7 +306,8 @@ static int32_t UnaryExp(const struct node_t *node)
 		if (node->size == 2)
 			FuncRParamsList(node->children[1]);
 		}
-		return 0;
+		// TODO make it optional
+		return 1;
 	default:
 		/* fallthrough */;
 	}
@@ -340,7 +354,8 @@ static int32_t PrimaryExp(const struct node_t *node)
 			if (m_constexpr)
 				error("Constants must be evaluated at compile t"
 				      "ime, while `%s` is a variable", ident);
-			return 0;
+			// TODO make it optional
+			return 1;
 		case FUNCTION:
 			error("Function as variable is not supported", ident);
 		}
@@ -523,8 +538,9 @@ static void FuncFParam(const struct node_t *node)
 	assert(node && node->data.kind == AST_FuncFParam);
 	m_this_node = node;
 
-	if (strcmp(node->children[0]->data.value.s, "int") != 0)
-		error("Only `int` params are supported");
+	BType(node->children[0]);
+	char *ident = node->children[1]->data.value.s;
+	symbols_add(g_symbols, ident, symbol_variable());
 }
 
 void semantic(const struct node_t *comp_unit)

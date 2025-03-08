@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+#include "debug.h"
 #include "hashtable.h"
 #include "koopaext.h"
 #include "macros.h"
@@ -158,10 +159,18 @@ koopa_raw_value_t koopa_raw_aggregate()
 	unimplemented();
 }
 
-koopa_raw_value_t koopa_raw_func_arg_ref(size_t index)
+koopa_raw_value_t koopa_raw_func_arg_ref(char *name, size_t index)
 {
-	(void) index;
-	todo();
+	koopa_raw_value_data_t *ret = bump_malloc(g_bump, sizeof(*ret));
+	ret->ty = koopa_raw_type_int32();
+	ret->name = name;
+	ret->used_by = slice_new(0, KOOPA_RSIK_VALUE);
+	ret->kind = (koopa_raw_value_kind_t) {
+		.tag = KOOPA_RVT_FUNC_ARG_REF,
+		.data.func_arg_ref.index = index,
+	};
+
+	return ret;
 }
 
 koopa_raw_value_t koopa_raw_block_arg_ref(size_t index)
@@ -303,8 +312,19 @@ koopa_raw_value_t koopa_raw_jump(koopa_raw_basic_block_t target)
 
 koopa_raw_value_t koopa_raw_call(koopa_raw_function_t callee)
 {
-	(void) callee;
-	todo();
+	koopa_raw_value_data_t *ret = bump_malloc(g_bump, sizeof(*ret));
+	ret->ty = callee->ty->data.function.ret;
+	ret->name = NULL;
+	ret->used_by = slice_new(0, KOOPA_RSIK_VALUE);
+	ret->kind = (koopa_raw_value_kind_t) {
+		.tag = KOOPA_RVT_CALL,
+		.data.call = {
+			.callee = callee,
+			.args = slice_new(0, KOOPA_RSIK_VALUE),
+		},
+	};
+
+	return ret;
 }
 
 koopa_raw_value_t koopa_raw_return(koopa_raw_value_t value)
@@ -318,7 +338,9 @@ koopa_raw_value_t koopa_raw_return(koopa_raw_value_t value)
 		.data.ret = { .value = value, },
 	};
 
-	slice_append(&ret->kind.data.ret.value->used_by, ret);
+	/* we can in fact return nothing */
+	if (value != NULL)
+		slice_append(&ret->kind.data.ret.value->used_by, ret);
 
 	return ret;
 }

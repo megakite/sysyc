@@ -20,13 +20,13 @@
  * table        |  /        |          \           \
  * (hash table) V V         V           V           V
  * +-----+  +--------+  +--------+  +--------+  +--------+
- * | [0]--->| symbol |->| symbol |->| symbol |->| symbol |
+ * | [0]--->| symbol |->| symbol |->| symbol |->| global |
  * +-----+  +--------+  +--------+  +--------+  +--------+
  * | [1] |                                      |  link  |
  * +-----+                                      +---/----+
  * | ... |                                         /
  * +-----+  +--------+                            /
- * | [N]--->| symbol |<--------------------------'
+ * | [N]--->| global |<--------------------------'
  * +-----+  +--------+
  *
  * i must admit that it's certainly not a good idea at all to implement a
@@ -63,7 +63,7 @@ struct _htable_strsym_t {
 /* opaque definition */
 struct _symbols_t {
 	htable_strsym_t table;
-	struct vector_t *levels;
+	struct vector_ptr_t *levels;
 
 	/* state variables */
 	struct _htable_strsym_item_t *last_item;
@@ -110,7 +110,7 @@ struct symbol_t symbol_function(uint32_t params, enum symbol_type_e type)
 			.level = symbols_level(g_symbols),
 			.scope = symbols_scope(g_symbols),
 		},
-		.tag = CONSTANT,
+		.tag = FUNCTION,
 		.function = {
 			.raw = NULL,
 			.params = params,
@@ -176,17 +176,23 @@ symbols_t symbols_new(void)
 {
 	struct _symbols_t *new = malloc(sizeof(*new));
 	new->table = htable_strsym_new();
-	new->levels = vector_new(0);
+	new->levels = vector_ptr_new(1);
 	new->last_item = NULL;
 	new->depth = 0;
 	new->level = -1;
+
+	// global level
+	symbols_indent(new);
 
 	return new;
 }
 
 void symbols_delete(symbols_t symbols)
 {
-	vector_delete(symbols->levels);
+	// global level
+	symbols_dedent(symbols);
+
+	vector_ptr_delete(symbols->levels);
 	htable_strsym_delete(symbols->table);
 	free(symbols);
 }
@@ -229,7 +235,7 @@ struct symbol_t *symbols_get(const symbols_t symbols, char *ident)
 {
 	struct symbol_t *symbol;
 	struct view_t view = symbols_lookup(symbols, ident);
-	for (symbol = view.begin; symbol; symbol = view.next(&view))
+	while ((symbol = view.next(&view)))
 		if (symbols_saw(symbols, symbol))
 			break;
 	return symbol;
@@ -268,7 +274,7 @@ void symbols_indent(symbols_t symbols)
 	if (++symbols->level == symbols->depth)
 	{
 		++symbols->depth;
-		vector_push(symbols->levels, level_new());
+		vector_ptr_push(symbols->levels, level_new());
 	}
 
 	/* this is what i call "the weird pattern" when we use flexible array
@@ -287,7 +293,7 @@ void symbols_leave(symbols_t symbols)
 	/* leave until this block has ended */
 	do
 		level = symbols->levels->data[symbols->level--];
-	while (symbols->level != -1 && level_at(level) != NULL);
+	while (symbols->level > 0 && level_at(level) != NULL);
 }
 
 void symbols_enter(symbols_t symbols)
@@ -303,10 +309,8 @@ void symbols_dedent(symbols_t symbols)
 	bool outside = false;
 	do
 	{
-		struct level_t *level = symbols->levels->data[symbols->level];
+		struct level_t *level = symbols->levels->data[symbols->level--];
 		assert(level->scope == level->begin);
-
-		--symbols->level;
 
 		struct _htable_strsym_item_t *link = level_poll(level);
 		if (!link)
@@ -334,5 +338,5 @@ void symbols_dedent(symbols_t symbols)
 		if (level_empty(level))
 			level_delete(level);
 	}
-	while (symbols->level != -1 && !outside);
+	while (symbols->level > 0 && !outside);
 }

@@ -14,6 +14,7 @@
 #include "codegen.h"
 #include "koopaext.h"
 #include "macros.h"
+#include "vector.h"
 #include "yield.h"
 
 /* Optional<Variant<ValuePtr, ValueIndex, StackOffset>> */
@@ -38,24 +39,34 @@ static htable_ptru32_t m_ht_stacks;
 
 static uint32_t m_var_count;
 static uint32_t m_val_count;
-static int32_t m_stack_stack;
-static int32_t m_inst_idx = -1;
+static uint32_t m_arg_spill;
+static int32_t m_stack_offset;
+/* TODO add checks. reg_t_idx should not be smaller than inst_idx */
 static int32_t m_reg_t_idx;
+static int32_t m_inst_idx = -1;
 
 /* emitters */
 #define emit(format, ...) \
 	fprintf(m_output, format __VA_OPT__(,) __VA_ARGS__)
 
 /* register limits */
-#define TMP_REGS 15
 #define T_MAX 7
-// `a6`, `a7` reserved for spilling
-#define REG_MAX (TMP_REGS - 2)
+#define A_MAX 8
+// a6, a7 reserved for spilling
+#define R_MAX (T_MAX + A_MAX - 2)
 
 /* getters */
-#define m_inst_sp ((m_inst_idx - REG_MAX + m_var_count) * sizeof(uint32_t))
-#define reg_t_sp ((reg_t_idx - REG_MAX + m_var_count) * sizeof(uint32_t))
-#define variant_sp ((variant->inst - REG_MAX + m_var_count) * sizeof(uint32_t))
+#define saved_regs min(m_val_count, R_MAX)
+
+#define m_inst_sp \
+	((m_inst_idx - R_MAX + m_var_count + saved_regs + m_arg_spill) \
+	 * sizeof(int32_t))
+#define reg_t_sp \
+	((reg_t_idx - R_MAX + m_var_count + saved_regs + m_arg_spill) \
+	 * sizeof(int32_t))
+#define variant_sp \
+	((variant->inst - R_MAX + m_var_count + saved_regs + m_arg_spill) \
+	 * sizeof(int32_t))
 
 static void oper(const char *op, bool self_repeat)
 {
@@ -63,7 +74,7 @@ static void oper(const char *op, bool self_repeat)
 	{
 		if (m_inst_idx < T_MAX)
 			emit("  %s t%d, t%d\n", op, m_inst_idx, m_inst_idx);
-		else if (m_inst_idx < REG_MAX)
+		else if (m_inst_idx < R_MAX)
 			emit("  %s a%d, a%d\n", op, m_inst_idx - T_MAX,
 			     m_inst_idx - T_MAX);
 		else
@@ -73,7 +84,7 @@ static void oper(const char *op, bool self_repeat)
 	{
 		if (m_inst_idx < T_MAX)
 			emit("  %s t%d, ", op, m_inst_idx);
-		else if (m_inst_idx < REG_MAX)
+		else if (m_inst_idx < R_MAX)
 			emit("  %s a%d, ", op, m_inst_idx - T_MAX);
 		else
 			emit("  %s a6, ", op);
@@ -88,7 +99,7 @@ static void oper(const char *op, bool self_repeat)
 		}
 	}
 
-	if (m_inst_idx >= REG_MAX)
+	if (m_inst_idx >= R_MAX)
 		emit("  sw a6, %lu(sp)\n", m_inst_sp);
 }
 
@@ -110,7 +121,7 @@ static void opnd(struct variant_t *variant)
 			if (reg_t_idx < T_MAX)
 				emit("  li t%d, %d\n", reg_t_idx,
 				     variant->value->kind.data.integer.value);
-			else if (reg_t_idx < REG_MAX)
+			else if (reg_t_idx < R_MAX)
 				emit("  li a%d, %d\n", reg_t_idx - T_MAX,
 				     variant->value->kind.data.integer.value);
 			else
@@ -120,7 +131,7 @@ static void opnd(struct variant_t *variant)
 
 		if (reg_t_idx < T_MAX)
 			yield(emit("t%d", use(m_reg_t_idx)));
-		else if (reg_t_idx < REG_MAX)
+		else if (reg_t_idx < R_MAX)
 			yield(emit("a%d", use(m_reg_t_idx) - T_MAX));
 
 		if (variant->value->kind.tag != KOOPA_RVT_INTEGER)
@@ -135,7 +146,7 @@ static void opnd(struct variant_t *variant)
 	case INST:
 		if (variant->inst < T_MAX)
 			yield(emit("t%d", use(variant)->inst));
-		else if (variant->inst < REG_MAX)
+		else if (variant->inst < R_MAX)
 			yield(emit("a%d", use(variant)->inst - T_MAX));
 
 		emit("  lw a%c, %lu(sp)\n", '6' + m_yield_end, variant_sp);
@@ -177,33 +188,123 @@ static void raw_basic_block(koopa_raw_basic_block_t basic_block);
 static void raw_function(koopa_raw_function_t function);
 static void raw_type(koopa_raw_type_t type);
 
-/* utilities */
-static void reserve_stack(void *block)
+/* register allocation */
+static void count_vars(void *basic_block)
 {
-	koopa_raw_basic_block_t _block = block;
-	for (uint32_t i = 0; i < _block->insts.len; ++i)
+	koopa_raw_basic_block_t _basic_block = basic_block;
+
+	for (uint32_t i = 0; i < _basic_block->insts.len; ++i)
 	{
-		koopa_raw_value_t value = _block->insts.buffer[i];
+		koopa_raw_value_t value = _basic_block->insts.buffer[i];
 		if (value->ty->tag == KOOPA_RTT_POINTER)
-		{
-			htable_ptru32_insert(m_ht_stacks, value,
-					     -m_stack_stack);
-			++m_var_count;
-			m_stack_stack -= sizeof(int32_t);
-		}
-		else if (value->ty->tag == KOOPA_RTT_INT32)
-			if (++m_val_count + m_var_count > REG_MAX)
-				m_stack_stack -= sizeof(int32_t);
+			htable_insert(m_ht_stacks, value,
+				      m_var_count++ * sizeof(int32_t));
 	}
 }
 
-/* allocator */
+/* really need some kind of garbage collection */
+static struct vector_u32_t *m_val_counts;
+static void count_vals(void *basic_block)
+{
+	koopa_raw_basic_block_t _basic_block = basic_block;
+
+	uint32_t val_count = 0;
+	for (uint32_t i = 0; i < _basic_block->insts.len; ++i)
+	{
+		koopa_raw_value_t value = _basic_block->insts.buffer[i];
+
+		if (value->ty->tag == KOOPA_RTT_INT32)
+			++val_count;
+	}
+	vector_u32_push(m_val_counts, val_count);
+}
+
+static struct vector_u32_t *m_arg_counts;
+static void count_args(void *basic_block)
+{
+	koopa_raw_basic_block_t _basic_block = basic_block;
+
+	uint32_t arg_count = 0;
+	for (uint32_t i = 0; i < _basic_block->insts.len; ++i)
+	{
+		koopa_raw_value_t value = _basic_block->insts.buffer[i];
+
+		if (value->kind.tag == KOOPA_RVT_CALL)
+			arg_count += value->kind.data.call.args.len;
+	}
+	vector_u32_push(m_arg_counts, arg_count);
+}
+
+#if 0
+typedef uint32_t (*acc_u32_t)(uint32_t a, uint32_t acc);
+
+static uint32_t max_u32(uint32_t a, uint32_t acc)
+{
+	return max(a, acc);
+}
+
+static uint32_t slice_fold(koopa_raw_slice_t *slice, acc_u32_t acc,
+			   uint32_t init)
+{
+}
+#endif
+
 static void function_prologue(koopa_raw_function_t function)
 {
-	slice_iter(&function->bbs, reserve_stack);
+	slice_iter(&function->bbs, count_vars);
+
+	/* let max_val_count =
+	 *   List.map function_bbs count_vals |> List.fold_left max 0;; */
+	uint32_t max_val_count = 0;
+	m_val_counts = vector_u32_new(function->bbs.len);
+	slice_iter(&function->bbs, count_vals);
+	for (size_t i = 0; i < m_val_counts->size; ++i)
+		max_val_count = max(m_val_counts->data[i], max_val_count);
+	vector_u32_delete(m_val_counts);
+	m_val_count = max_val_count;
+
+	/* let max_arg_count =
+	 *   List.map function_bbs count_args |> List.fold_left max 0;; */
+	uint32_t max_arg_count = 0;
+	m_arg_counts = vector_u32_new(function->bbs.len);
+	slice_iter(&function->bbs, count_args);
+	for (size_t i = 0; i < m_arg_counts->size; ++i)
+		max_arg_count = max(m_arg_counts->data[i], max_arg_count);
+	vector_u32_delete(m_arg_counts);
+	m_arg_spill = max(max_arg_count, A_MAX) - A_MAX;
+
+	/* (high)
+	 * 1. return address;
+	 * 2. spilled values;
+	 * 3. local variables;
+	 * 4. saved registers;
+	 * 5. spilled arguments;
+	 * (low) */
+	uint32_t total = 0;
+	total += sizeof(uint32_t);
+	total += m_var_count;
+	total += max(max_val_count, R_MAX) - R_MAX;
+	total += min(max_val_count, R_MAX);
+	total += m_arg_spill;
+
 	// align to 16 bytes
-	m_stack_stack &= -16;
-	emit("  addi sp, sp, %d\n", m_stack_stack);
+	m_stack_offset = -(total * sizeof(int32_t)) & -16;
+	emit("  addi sp, sp, %d\n", m_stack_offset);
+	emit("  sw ra, %lu(sp)\n", -m_stack_offset - sizeof(uint32_t));
+
+	printf("%s(%u): val = %u, var = %u, stack = %d\n", function->name,
+	       function->params.len, max_val_count, m_var_count,
+	       m_stack_offset);
+}
+
+static void function_epilogue()
+{
+	m_var_count = 0;
+	m_val_count = 0;
+	m_arg_spill = 0;
+	m_stack_offset = 0;
+	m_reg_t_idx = 0;
+	m_inst_idx = 0;
 }
 
 /* kind generators */
@@ -246,13 +347,17 @@ static void raw_kind_store(koopa_raw_store_t *store)
 
 static void raw_kind_return(koopa_raw_return_t *ret)
 {
-	struct variant_t value = raw_value(ret->value);
+	if (ret->value)
+	{
+		struct variant_t value = raw_value(ret->value);
 
-	opnd(&value);
-	emit("  mv a0, ");
-	next();
-	emit("\n");
-	emit("  addi sp, sp, %d\n", -m_stack_stack);
+		opnd(&value);
+		emit("  mv a0, ");
+		next();
+		emit("\n");
+	}
+	emit("  lw ra, %lu(sp)\n", -m_stack_offset - sizeof(uint32_t));
+	emit("  addi sp, sp, %d\n", -m_stack_offset);
 	emit("  ret\n");
 }
 
@@ -345,7 +450,7 @@ static void raw_slice(const koopa_raw_slice_t *slice)
 		for (uint32_t i = 0; i < slice->len; ++i)
 		{
 			koopa_raw_value_t value = slice->buffer[i];
-			if (value->ty->tag != KOOPA_RTT_UNIT)
+			if (value->ty->tag == KOOPA_RTT_INT32)
 				// register t_n should start from index of
 				// current value that has non-unit type.
 				// TODO optimize stepping strategy
@@ -356,35 +461,92 @@ static void raw_slice(const koopa_raw_slice_t *slice)
 	}
 }
 
+static void raw_kind_call(const koopa_raw_call_t *call)
+{
+	const koopa_raw_function_t callee = call->callee;
+	const koopa_raw_slice_t *args = &call->args;
+
+	/* parameters */
+	struct variant_t arg;
+	for (uint32_t i = 0; i < min(args->len, A_MAX); ++i)
+	{
+		arg = raw_value(args->buffer[i]);
+
+		emit("  mv a%c, ", '0' + i);
+		opnd(&arg);
+		next();
+		emit("\n");
+	}
+	if (args->len > A_MAX)
+		for (uint32_t i = A_MAX; i < args->len; ++i)
+		{
+			uint32_t offset = (i - A_MAX) * sizeof(int32_t);
+			arg = raw_value(args->buffer[i]);
+
+			emit("  sw ");
+			opnd(&arg);
+			next();
+			emit(", %u(sp)\n", offset);
+		}
+
+	/* saved registers */
+	for (uint32_t i = 0; i < min(m_val_count, R_MAX); ++i)
+		if (i < T_MAX)
+			emit("  sw t%d, %lu(sp)\n", i,
+			     (i + m_arg_spill) * sizeof(int32_t));
+		else
+			emit("  sw a%d, %lu(sp)\n", i - T_MAX,
+			     (i + m_arg_spill) * sizeof(int32_t));
+
+	emit("  call %s\n", callee->name + 1);
+
+	// TODO refactor: synchronicity
+	if (m_inst_idx < T_MAX)
+		emit("  mv t%d, a0\n", m_inst_idx);
+	else if (m_inst_idx < R_MAX)
+		emit("  mv a%d, a0\n", m_inst_idx);
+	else
+		emit("  sw a0, %lu(sp)\n", m_inst_sp);
+
+	/* pop caller-saved */
+	for (uint32_t i = 0; i < min(m_val_count, R_MAX); ++i)
+		if (i < T_MAX)
+			emit("  lw t%d, %lu(sp)\n", i,
+			     (i + m_arg_spill) * sizeof(int32_t));
+		else
+			emit("  lw a%d, %lu(sp)\n", i - T_MAX,
+			     (i + m_arg_spill) * sizeof(int32_t));
+}
+
+static void raw_kind_func_arg_ref(const koopa_raw_func_arg_ref_t *func_arg_ref)
+{
+}
+
 /* weird return type... i wonder if there's a better way to backtrack. currently
  * if we're not using `struct variant_t` we'll have to call `htable_lookup()`
- * twice: first in this function, then in `opnd()`. */
+ * twice: first in this function, then in `opnd()`.
+ * TODO this devastatingly needs to be refactored */
 static struct variant_t raw_value(koopa_raw_value_t raw)
 {
 	if (!raw)
 		return (struct variant_t) { .tag = NONE, };
 
-	if (raw->kind.tag == KOOPA_RVT_ALLOC)
-	{
-		uint32_t *stack_it = htable_lookup(m_ht_stacks, raw);
-		assert(stack_it);
+	/* KOOPA_RTT_POINTER */
+	uint32_t *stack_it = htable_lookup(m_ht_stacks, raw);
+	if (stack_it)
+		return (struct variant_t) { .tag = STACK, .stack = *stack_it, };
 
-		return (struct variant_t) {
-			.tag = STACK,
-			.stack = *stack_it,
-		};
-	}
-
-	uint32_t *value_it = htable_lookup(m_ht_insts, raw);
-	if (value_it)
-		return (struct variant_t) { .tag = INST, .inst = *value_it, };
+	/* KOOPA_RTT_INT32 */
+	uint32_t *inst_it = htable_lookup(m_ht_insts, raw);
+	if (inst_it)
+		return (struct variant_t) { .tag = INST, .inst = *inst_it, };
 
 	raw_type(raw->ty);
 
 	switch (raw->kind.tag)
 	{
 	case KOOPA_RVT_INTEGER:
-		/* do nothing */
+		/* immediate */
 		break;
 	case KOOPA_RVT_ZERO_INIT:
 		todo();
@@ -393,13 +555,16 @@ static struct variant_t raw_value(koopa_raw_value_t raw)
 		todo();
 		break;
 	case KOOPA_RVT_FUNC_ARG_REF:
-		todo();
+		raw_kind_func_arg_ref(&raw->kind.data.load);
 		break;
 	case KOOPA_RVT_BLOCK_ARG_REF:
 		todo();
 		break;
 	case KOOPA_RVT_AGGREGATE:
 		unimplemented();
+		break;
+	case KOOPA_RVT_ALLOC:
+		/* stack */
 		break;
 	case KOOPA_RVT_GLOBAL_ALLOC:
 		todo();
@@ -411,7 +576,6 @@ static struct variant_t raw_value(koopa_raw_value_t raw)
 		break;
 	case KOOPA_RVT_STORE:
 		raw_kind_store(&raw->kind.data.store);
-		htable_insert(m_ht_insts, raw, m_inst_idx);
 		break;
 	case KOOPA_RVT_GET_PTR:
 		todo();
@@ -429,20 +593,16 @@ static struct variant_t raw_value(koopa_raw_value_t raw)
 		break;
 	case KOOPA_RVT_BRANCH:
 		raw_kind_branch(&raw->kind.data.branch);
-		htable_insert(m_ht_insts, raw, m_inst_idx);
 		break;
 	case KOOPA_RVT_JUMP:
 		raw_kind_jump(&raw->kind.data.jump);
-		htable_insert(m_ht_insts, raw, m_inst_idx);
 		break;
 	case KOOPA_RVT_CALL:
-		todo();
-		raw_function(raw->kind.data.call.callee);
-		raw_slice(&raw->kind.data.call.args);
+		raw_kind_call(&raw->kind.data.call);
+		htable_insert(m_ht_insts, raw, m_inst_idx);
 		break;
 	case KOOPA_RVT_RETURN:
 		raw_kind_return(&raw->kind.data.ret);
-		htable_insert(m_ht_insts, raw, m_inst_idx);
 		break;
 	default:
 		break;
@@ -457,7 +617,9 @@ static void raw_basic_block(koopa_raw_basic_block_t raw)
 		return;
 
 	emit("%s:\n", raw->name + 1);
-	raw_slice(&raw->params);
+	if (strcmp(raw->name, "entry") == 0)
+		emit("  sw pc, 0(sp)\n");
+	// raw_slice(&raw->params);
 	// raw_slice(&raw->used_by);
 	raw_slice(&raw->insts);
 	
@@ -469,8 +631,12 @@ static void raw_function(koopa_raw_function_t raw)
 	if (!raw)
 		return;
 
+	/* declaration only */
+	if (raw->bbs.len == 0)
+		return;
+
 	// every function is global (`extern`al)
-	emit("  .globl %s\n", raw->name + 1);
+	emit("\n  .globl %s\n", raw->name + 1);
 	emit("%s:\n", raw->name + 1);
 
 	// TODO really ugly, should be refactored
@@ -480,7 +646,7 @@ static void raw_function(koopa_raw_function_t raw)
 	raw_slice(&raw->params);
 	raw_slice(&raw->bbs);
 
-	m_stack_stack = 0;
+	function_epilogue();
 }
 
 static void raw_type(koopa_raw_type_t raw)

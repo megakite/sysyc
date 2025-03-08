@@ -72,7 +72,7 @@ int main(int argc, char **argv)
 	if (error)
 		return 1;
 
-#if 1
+#if 0
 	/* print AST */
 	printf("======= Abstract syntax tree (AST)\n");
 	ast_print(comp_unit);
@@ -98,7 +98,11 @@ int main(int argc, char **argv)
 	printf("======= Verifying memory IR integrity...\n");
 	koopa_program_t program;
 	koopa_error_code_t ret = koopa_generate_raw_to_koopa(&raw, &program);
-	assert(ret == KOOPA_EC_SUCCESS);
+	if (ret != KOOPA_EC_SUCCESS)
+	{
+		printf("error code: %d", ret);
+		goto cleanup_raw_program;
+	}
 
 	/* compile to RISC-V assembly */
 	if (strcmp(mode, "-riscv") == 0)
@@ -127,7 +131,9 @@ int main(int argc, char **argv)
 
 	/* cleanup */
 	printf("======= Cleaning up...\n");
+cleanup_program:
 	koopa_delete_program(program);
+cleanup_raw_program:
 	bump_delete(bump);
 cleanup_comp_unit:
 	node_delete(comp_unit);

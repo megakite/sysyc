@@ -15,14 +15,15 @@
 #include "globals.h"
 
 /* state variables */
-static koopa_raw_basic_block_t m_curr_basic_block;
-static koopa_raw_function_t m_curr_function;
 static koopa_raw_program_t *m_curr_program;
+static koopa_raw_function_t m_curr_function;
+static koopa_raw_basic_block_t m_curr_basic_block;
+static koopa_raw_value_t m_curr_call;
 
 static koopa_raw_basic_block_t m_curr_cond;
 static koopa_raw_basic_block_t m_curr_end;
 
-static size_t m_mangle_idx;
+static uint32_t m_mangle_idx;
 static bool m_returned;
 
 /* accessor decl.s */
@@ -60,9 +61,9 @@ static void BlockItemList(const struct node_t *node);
 
 static void FuncDefList(const struct node_t *node);
 static void FuncFParamsList(const struct node_t *node);
-static void FuncFParam(const struct node_t *node);
+static koopa_raw_value_t FuncFParam(const struct node_t *node);
 static void FuncRParamsList(const struct node_t *node);
-static void FuncRParam(const struct node_t *node);
+static koopa_raw_value_t FuncRParam(const struct node_t *node);
 
 /* tool functions */
 static char *mangle(char *ident)
@@ -70,11 +71,13 @@ static char *mangle(char *ident)
 	if (!ident)
 		return NULL;
 
-	char name[IDENT_MAX];
-	snprintf(name, IDENT_MAX, "%s_%hd_%hd_%zu", ident,
-		 symbols_level(g_symbols), symbols_scope(g_symbols),
-		 m_mangle_idx++);
-	name[IDENT_MAX - 1] = '\0';
+#define MANGLED_MAX (IDENT_MAX + 1 + IDENT_MAX + (1 + 6) * 2 + (1 + 10))
+	char name[MANGLED_MAX];
+	snprintf(name, MANGLED_MAX, "%s_%s_%hd_%hd_%u",
+		 m_curr_function->name + 1, ident, symbols_level(g_symbols),
+		 symbols_scope(g_symbols), m_mangle_idx++);
+	name[MANGLED_MAX - 1] = '\0';
+#undef MANGLED_MAX
 
 	return bump_strdup(g_bump, name);
 }
@@ -161,13 +164,23 @@ static koopa_raw_value_t UnaryExp(const struct node_t *node)
 	case AST_PrimaryExp:
 		return PrimaryExp(node->children[0]);
 	case AST_IDENT:
-		/* function calls.
-		 * IDENT (LP) [FuncRParams] (RP) */
 		{
+		char *ident = node->children[0]->data.value.s;
+		struct symbol_t *symbol = symbols_get(g_symbols, ident);
+		assert(symbol && symbol->tag == FUNCTION);
+
+		koopa_raw_value_t this_call = m_curr_call;
+		koopa_raw_value_t call = koopa_raw_call(symbol->function.raw);
+		// "push"
+		m_curr_call = call;
+		/* function call: IDENT (LP) [FuncRParams] (RP) */
 		if (node->size == 2)
 			FuncRParamsList(node->children[1]);
+		// "pop"
+		m_curr_call = this_call;
+		try_append(&m_curr_basic_block->insts, call);
+		return call;
 		}
-		return 0;
 	default:
 		/* fallthrough */;
 	}
@@ -507,6 +520,47 @@ static void FuncDefList(const struct node_t *node)
 {
 	assert(node && node->data.kind == AST_FuncDefList);
 
+	slice_append(&m_curr_program->funcs,
+		koopa_raw_function(
+			koopa_raw_type_function(koopa_raw_type_int32()),
+			"getint"
+		));
+	slice_append(&m_curr_program->funcs,
+		koopa_raw_function(
+			koopa_raw_type_function(koopa_raw_type_int32()),
+			"getch"
+		));
+	slice_append(&m_curr_program->funcs,
+		koopa_raw_function(
+			koopa_raw_type_function(koopa_raw_type_int32()),
+			"getarray"
+		));
+	slice_append(&m_curr_program->funcs,
+		koopa_raw_function(
+			koopa_raw_type_function(koopa_raw_type_int32()),
+			"putint"
+		));
+	slice_append(&m_curr_program->funcs,
+		koopa_raw_function(
+			koopa_raw_type_function(koopa_raw_type_int32()),
+			"putch"
+		));
+	slice_append(&m_curr_program->funcs,
+		koopa_raw_function(
+			koopa_raw_type_function(koopa_raw_type_int32()),
+			"putarray"
+		));
+	slice_append(&m_curr_program->funcs,
+		koopa_raw_function(
+			koopa_raw_type_function(koopa_raw_type_int32()),
+			"starttime"
+		));
+	slice_append(&m_curr_program->funcs,
+		koopa_raw_function(
+			koopa_raw_type_function(koopa_raw_type_int32()),
+			"stoptime"
+		));
+
 	for (int i = node->size - 1; i >= 0; --i)
 		slice_append(&m_curr_program->funcs,
 			     FuncDef(node->children[i]));
@@ -518,16 +572,36 @@ static koopa_raw_function_t FuncDef(const struct node_t *node)
 
 	char *name = node->children[1]->data.value.s;
 
-	/* initial basic block */
-	koopa_raw_basic_block_t bb = koopa_raw_basic_block("entry");
-	m_curr_basic_block = bb;
-
 	koopa_raw_type_t ty = FuncType(node->children[0]);
 	koopa_raw_function_t ret = koopa_raw_function(ty, name);
 	m_curr_function = ret;
+
+	struct symbol_t *symbol = symbols_get(g_symbols, name);
+	assert(symbol);
+	symbol->function.raw = ret;
+
+	/* initial basic block */
+	koopa_raw_basic_block_t bb = koopa_raw_basic_block(mangle("entry"));
+	m_curr_basic_block = bb;
 	slice_append(&ret->bbs, bb);
 
-	Block(node->children[2]);
+	symbols_enter(g_symbols);
+	if (node->size == 4)
+	{
+		/* has parameters */
+		FuncFParamsList(node->children[2]);
+		Block(node->children[3]);
+	}
+	else
+		Block(node->children[2]);
+	symbols_dedent(g_symbols);
+
+	// prepend a return statement in function returning void
+	koopa_raw_value_t last = slice_back(&m_curr_basic_block->insts);
+	if (ty->data.function.ret->tag == KOOPA_RTT_UNIT
+	    && (!last || last->kind.tag != KOOPA_RVT_RETURN))
+		slice_append(&m_curr_basic_block->insts,
+			     koopa_raw_return(NULL));
 
 	return ret;
 }
@@ -540,14 +614,12 @@ static koopa_raw_program_t CompUnit(const struct node_t *node)
 		.values = slice_new(0, KOOPA_RSIK_VALUE),
 		.funcs = slice_new(0, KOOPA_RSIK_FUNCTION),
 	};
-	// XXX very dangerous, but we're in fact not rewinding the stack until
+	// XXX very dangerous, but we're in fact not unwinding the stack until
 	// traversal of the whole program has been completed, so it shouldn't be
-	// a problem
+	// a problem for now
 	m_curr_program = &ret;
 
-	symbols_enter(g_symbols);
 	FuncDefList(node->children[0]);
-	symbols_dedent(g_symbols);
 
 	return ret;
 }
@@ -576,7 +648,7 @@ static koopa_raw_value_t VarDef(const struct node_t *node)
 
 	struct symbol_t *symbol;
 	struct view_t view = symbols_lookup(g_symbols, ident);
-	for (symbol = view.begin; symbol; symbol = view.next(&view))
+	while ((symbol = view.next(&view)))
 		if (symbols_here(g_symbols, symbol))
 			break;
 	assert(symbol);
@@ -664,28 +736,47 @@ static void FuncRParamsList(const struct node_t *node)
 {
 	assert(node && node->data.kind == AST_FuncRParamsList);
 
-	todo();
+	for (int i = node->size - 1; i >= 0; --i)
+		slice_append(&m_curr_call->kind.data.call.args,
+			     FuncRParam(node->children[i]));
 }
 
-static void FuncRParam(const struct node_t *node)
+static koopa_raw_value_t FuncRParam(const struct node_t *node)
 {
 	assert(node && node->data.kind == AST_FuncRParam);
 
-	todo();
+	return Exp(node->children[0]);
 }
 
 static void FuncFParamsList(const struct node_t *node)
 {
 	assert(node && node->data.kind == AST_FuncFParamsList);
 
-	todo();
+	for (int i = node->size - 1; i >= 0; --i)
+		slice_append(&m_curr_function->params,
+			     FuncFParam(node->children[i]));
 }
 
-static void FuncFParam(const struct node_t *node)
+static koopa_raw_value_t FuncFParam(const struct node_t *node)
 {
 	assert(node && node->data.kind == AST_FuncFParam);
 
-	todo();
+	char *ident = node->children[1]->data.value.s;
+	struct symbol_t *symbol = symbols_get(g_symbols, ident);
+	assert(symbol);
+
+	char *name = koopa_raw_name_local(mangle(ident));
+	koopa_raw_value_t ret =
+		koopa_raw_func_arg_ref(name, m_curr_function->params.len);
+	slice_append(&m_curr_function->ty->data.function.params,
+		     koopa_raw_type_int32());
+	koopa_raw_value_t alloc = symbol->variable.raw =
+		koopa_raw_alloc(koopa_raw_name_local(ident),
+				koopa_raw_type_int32());
+	slice_append(&m_curr_basic_block->insts, alloc);
+	slice_append(&m_curr_basic_block->insts, koopa_raw_store(ret, alloc));
+
+	return ret;
 }
 
 /* public defn.s */

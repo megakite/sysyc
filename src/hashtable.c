@@ -29,16 +29,17 @@ struct _htable_strsym_t {
 };
 
 /* hash functions */
-static uint8_t hash_str(char *key)
+static uint8_t hash_str(char *s)
 {
-	uint8_t val = 0, i;
-	for (; *key; ++key)
+	uint8_t h = 0, high;
+	while (*s)
 	{
-		val = (val << 1) + *key;
-		if ((i = val & ~HASHTABLE_BITS))
-			val = (val ^ (i >> 6)) & HASHTABLE_BITS;
+		h = (h << 1) + *s++;
+		if ((high = h & 0x80))
+			h ^= high >> 6;
+		h &= ~high;
 	}
-	return val;
+	return h;
 }
 
 static uint8_t hash_ptr(void *p)
