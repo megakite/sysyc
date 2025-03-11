@@ -15,7 +15,7 @@ CFLAGS := -Wall -Wextra -std=c11 -D_POSIX_C_SOURCE=200809L -fsanitize=address \
 	  -fno-stack-protector # otherwise `longjmp()` will break
 CXXFLAGS := -Wall -Wno-register -std=c++17
 FFLAGS :=
-BFLAGS := -d
+BFLAGS := -d -Wcounterexamples
 LDFLAGS := -lasan
 
 # Debug flags

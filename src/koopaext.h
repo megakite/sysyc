@@ -24,6 +24,8 @@ char *koopa_raw_name_local(char *ident);
 
 /* IR builders */
 koopa_raw_value_t koopa_raw_integer(int32_t value);
+koopa_raw_value_t koopa_raw_zero_init(koopa_raw_type_t ty);
+koopa_raw_value_t koopa_raw_undef(koopa_raw_type_t ty);
 koopa_raw_value_t koopa_raw_aggregate();
 koopa_raw_value_t koopa_raw_func_arg_ref(char *name, size_t index);
 koopa_raw_value_t koopa_raw_block_arg_ref(size_t index);

@@ -6,6 +6,16 @@
 #include "macros.h"
 
 /* opaque type definitions */
+struct _htable_ppuu32_item_t {
+	struct _htable_ppuu32_item_t *next;
+	uint32_t value;
+	struct pair_ptru32_t key;
+};
+
+struct _htable_ppuu32_t {
+	struct _htable_ppuu32_item_t *data[HASHTABLE_SIZE];
+};
+
 struct _htable_ptru32_item_t {
 	struct _htable_ptru32_item_t *next;
 	uint32_t value;
@@ -77,6 +87,17 @@ static struct _htable_ptru32_item_t *htable_ptru32_item_new(void *key,
 	return new;
 }
 
+static struct _htable_ppuu32_item_t *htable_ppuu32_item_new(
+	struct pair_ptru32_t key, uint32_t value)
+{
+	struct _htable_ppuu32_item_t *new = malloc(sizeof(*new));
+	new->next = NULL;
+	new->value = value;
+	new->key = key;
+
+	return new;
+}
+
 /* HashTable<String, Ptr> */
 htable_strsym_t htable_strsym_new(void)
 {
@@ -86,22 +107,20 @@ htable_strsym_t htable_strsym_new(void)
 
 static void *strsym_next(struct view_t *this)
 {
-	bool found = false;
-	struct symbol_t *ret = NULL;
 	struct _htable_strsym_item_t *item;
-	while (!found
-	       && (item = container_of(this->begin,
-				       struct _htable_strsym_item_t, value)))
-	{
-		if (strcmp(item->key, this->key) == 0)
-			found = true;
 
-		/* return this->begin++; */
-		ret = &item->value;
+	while ((item = container_of(this->begin, struct _htable_strsym_item_t,
+				    value)))
+	{
 		this->begin = &item->next->value;
+
+		if (strcmp(item->key, this->key) == 0)
+			break;
+
+		item = item->next;
 	}
 
-	return ret;
+	return item ? &item->value : NULL;
 }
 
 struct view_t htable_strsym_lookup(htable_strsym_t table, char *key)
@@ -184,6 +203,57 @@ void htable_ptru32_delete(htable_ptru32_t table)
 	{
 		struct _htable_ptru32_item_t *item = table->data[i];
 		struct _htable_ptru32_item_t *next;
+		while (item)
+		{
+			next = item->next;
+			free(item);
+			item = next;
+		}
+	}
+	free(table);
+}
+
+/* HashTable<Pair<Ptr, UInt32>, UInt32> */
+htable_ppuu32_t htable_ppuu32_new(void)
+{
+	struct _htable_ppuu32_t *new = calloc(1, sizeof(*new));
+	return new;
+}
+
+uint32_t *htable_ppuu32_lookup(htable_ppuu32_t table, struct pair_ptru32_t key)
+{
+	uint8_t i = hash_ptr(key.ptr);
+	struct _htable_ppuu32_item_t *item = table->data[i];
+	if (!item)
+		return NULL;
+
+	do
+	{
+		if (key.ptr == item->key.ptr && key.u32 == item->key.u32)
+			return &item->value;
+	} while ((item = item->next));
+
+	return NULL;
+}
+
+uint32_t *htable_ppuu32_insert(htable_ppuu32_t table, struct pair_ptru32_t key,
+			       uint32_t value)
+{
+	uint8_t i = hash_ptr(key.ptr);
+	struct _htable_ppuu32_item_t *new = htable_ppuu32_item_new(key, value);
+	if (table->data[i])
+		new->next = table->data[i];
+
+	table->data[i] = new;
+	return &new->value;
+}
+
+void htable_ppuu32_delete(htable_ppuu32_t table)
+{
+	for (size_t i = 0; i < HASHTABLE_SIZE; ++i)
+	{
+		struct _htable_ppuu32_item_t *item = table->data[i];
+		struct _htable_ppuu32_item_t *next;
 		while (item)
 		{
 			next = item->next;

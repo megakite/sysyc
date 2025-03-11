@@ -11,6 +11,9 @@
 #include "macros.h"
 #include "globals.h"
 
+// TODO make a table that efficiently deduplicates different kinds of values
+// that are in fact the same thing
+
 /* raw program memory management */
 void koopa_raw_program_set_allocator(bump_t bump)
 {
@@ -159,6 +162,25 @@ koopa_raw_value_t koopa_raw_aggregate()
 	unimplemented();
 }
 
+koopa_raw_value_t koopa_raw_zero_init(koopa_raw_type_t ty)
+{
+	koopa_raw_value_data_t *ret = bump_malloc(g_bump, sizeof(*ret));
+	ret->ty = ty;
+	ret->name = NULL;
+	ret->used_by = slice_new(0, KOOPA_RSIK_VALUE);
+	ret->kind = (koopa_raw_value_kind_t) {
+		.tag = KOOPA_RVT_ZERO_INIT,
+	};
+
+	return ret;
+}
+
+koopa_raw_value_t koopa_raw_undef(koopa_raw_type_t ty)
+{
+	(void) ty;
+	todo();
+}
+
 koopa_raw_value_t koopa_raw_func_arg_ref(char *name, size_t index)
 {
 	koopa_raw_value_data_t *ret = bump_malloc(g_bump, sizeof(*ret));
@@ -181,8 +203,18 @@ koopa_raw_value_t koopa_raw_block_arg_ref(size_t index)
 
 koopa_raw_value_t koopa_raw_global_alloc(char *name, koopa_raw_value_t init)
 {
-	(void) name, (void) init;
-	todo();
+	koopa_raw_value_data_t *ret = bump_malloc(g_bump, sizeof(*ret));
+	ret->ty = koopa_raw_type_pointer(init->ty);
+	ret->name = name;
+	ret->used_by = slice_new(0, KOOPA_RSIK_VALUE);
+	ret->kind = (koopa_raw_value_kind_t) {
+		.tag = KOOPA_RVT_GLOBAL_ALLOC,
+		.data.global_alloc = { .init = init, },
+	};
+
+	slice_append(&ret->kind.data.global_alloc.init->used_by, ret);
+	
+	return ret;
 }
 
 koopa_raw_value_t koopa_raw_alloc(char *name, koopa_raw_type_t base)

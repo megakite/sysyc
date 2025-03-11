@@ -9,8 +9,10 @@
 #define YIELD_MAX 2
 
 static struct {
+	struct {
+		int32_t reg_idx;
+	} m_bb;
 	uint8_t m_yield_end;
-	int32_t m_reg_t_idx;
 	struct variant_t *variant;
 } m_yield_vars[YIELD_MAX];
 

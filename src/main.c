@@ -131,7 +131,6 @@ int main(int argc, char **argv)
 
 	/* cleanup */
 	printf("======= Cleaning up...\n");
-cleanup_program:
 	koopa_delete_program(program);
 cleanup_raw_program:
 	bump_delete(bump);

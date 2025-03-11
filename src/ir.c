@@ -29,7 +29,7 @@ static bool m_returned;
 /* accessor decl.s */
 static koopa_raw_program_t CompUnit(const struct node_t *node);
 static koopa_raw_function_t FuncDef(const struct node_t *node);
-static koopa_raw_type_t FuncType(const struct node_t *node);
+static koopa_raw_type_t Type(const struct node_t *node);
 static void Block(const struct node_t *node);
 
 static void Stmt(const struct node_t *node);
@@ -42,7 +42,6 @@ static void Decl(const struct node_t *node);
 #if 0
 /* already evaluated during semantic analysis phase */
 static koopa_raw_value_t ConstDecl(const struct node_t *node);
-static koopa_raw_value_t BType(const struct node_t *node);
 static koopa_raw_value_t ConstDef(const struct node_t *node);
 static koopa_raw_value_t ConstInitVal(const struct node_t *node);
 #endif
@@ -59,14 +58,15 @@ static koopa_raw_value_t ConstDefList(const struct node_t *node);
 static void VarDefList(const struct node_t *node);
 static void BlockItemList(const struct node_t *node);
 
-static void FuncDefList(const struct node_t *node);
-static void FuncFParamsList(const struct node_t *node);
+static void FuncFParamList(const struct node_t *node);
 static koopa_raw_value_t FuncFParam(const struct node_t *node);
-static void FuncRParamsList(const struct node_t *node);
+static void FuncRParamList(const struct node_t *node);
 static koopa_raw_value_t FuncRParam(const struct node_t *node);
+static void GlobalList(const struct node_t *node);
+static void Global(const struct node_t *node);
 
 /* tool functions */
-static void generate_lib_funcs(void)
+static void init_lib(void)
 {
 	koopa_raw_function_t getint =
 		koopa_raw_function(
@@ -178,9 +178,9 @@ static void try_append(koopa_raw_slice_t *slice, koopa_raw_value_t inst)
 }
 
 /* accessor defn.s */
-static koopa_raw_type_t FuncType(const struct node_t *node)
+static koopa_raw_type_t Type(const struct node_t *node)
 {
-	assert(node && node->data.kind == AST_FuncType);
+	assert(node && node->data.kind == AST_Type);
 
 	char *type = node->children[0]->data.value.s;
 
@@ -190,7 +190,7 @@ static koopa_raw_type_t FuncType(const struct node_t *node)
 	else if (strcmp(type, "void") == 0)
 		ret = koopa_raw_type_function(koopa_raw_type_unit());
 	else
-		panic("unsupported FuncType");
+		panic("unsupported Type");
 
 	return ret;
 }
@@ -215,7 +215,7 @@ static koopa_raw_value_t PrimaryExp(const struct node_t *node)
 	case AST_Exp:
 		return Exp(node->children[0]);
 	case AST_LVal:
-		{
+	{
 		koopa_raw_value_t lval = LVal(node->children[0]);
 		/* if lval is a constant */
 		if (lval->ty->tag == KOOPA_RTT_INT32)
@@ -241,7 +241,7 @@ static koopa_raw_value_t UnaryExp(const struct node_t *node)
 	case AST_PrimaryExp:
 		return PrimaryExp(node->children[0]);
 	case AST_IDENT:
-		{
+	{
 		char *ident = node->children[0]->data.value.s;
 		struct symbol_t *symbol = symbols_get(g_symbols, ident);
 		assert(symbol && symbol->tag == FUNCTION);
@@ -252,7 +252,7 @@ static koopa_raw_value_t UnaryExp(const struct node_t *node)
 		m_curr_call = call;
 		/* function call: IDENT (LP) [FuncRParams] (RP) */
 		if (node->size == 2)
-			FuncRParamsList(node->children[1]);
+			FuncRParamList(node->children[1]);
 		// "pop"
 		m_curr_call = this_call;
 		try_append(&m_curr_basic_block->insts, call);
@@ -297,17 +297,10 @@ static koopa_raw_value_t Exp(const struct node_t *node)
 	if (node->size == 1)
 		return UnaryExp(node->children[0]);
 
-	/* otherwise, binary expression */
-	char *op_token = node->children[1]->data.value.s;
-	koopa_raw_value_t lhs = Exp(node->children[0]);
-	koopa_raw_value_t rhs = Exp(node->children[2]);
-
 	koopa_raw_value_t ret;
-	switch (node->children[1]->data.kind)
+	/* naughty logical operators */
+	if (node->children[1]->data.kind == AST_LOR)
 	{
-	case AST_LOR:
-		/* short-circuiting */
-		{
 		koopa_raw_basic_block_t false_bb =
 			koopa_raw_basic_block(mangle("lor_rhs"));
 		koopa_raw_basic_block_t end_bb =
@@ -327,32 +320,41 @@ static koopa_raw_value_t Exp(const struct node_t *node)
 
 		/* if (!lhs) */
 		koopa_raw_value_t lfalse =
-			koopa_raw_binary(KOOPA_RBO_EQ, lhs,
+			koopa_raw_binary(KOOPA_RBO_EQ, Exp(node->children[0]),
 					 koopa_raw_integer(0));
 		koopa_raw_value_t branch = koopa_raw_branch(lfalse, false_bb,
 							    end_bb);
 		try_append(&m_curr_basic_block->insts, lfalse);
 		try_append(&m_curr_basic_block->insts, branch);
 
+		m_curr_basic_block = false_bb;
+
 		/* result = rhs; */
 		koopa_raw_value_t rtrue =
-			koopa_raw_binary(KOOPA_RBO_NOT_EQ, rhs,
+			koopa_raw_binary(KOOPA_RBO_NOT_EQ,
+					 Exp(node->children[2]),
 					 koopa_raw_integer(0));
 		koopa_raw_value_t store = koopa_raw_store(rtrue, result);
 		koopa_raw_value_t jump = koopa_raw_jump(end_bb);
 
-		try_append(&false_bb->insts, rtrue);
-		try_append(&false_bb->insts, store);
-		try_append(&false_bb->insts, jump);
+		try_append(&m_curr_basic_block->insts, rtrue);
+		try_append(&m_curr_basic_block->insts, store);
+		try_append(&m_curr_basic_block->insts, jump);
 
 		m_curr_basic_block = end_bb;
 
 		ret = koopa_raw_load(result);
-		}
-		break;
-	case AST_LAND:
-		/* short-circuiting */
-		{
+		goto complete;
+	}
+	if (node->children[1]->data.kind == AST_LAND)
+	{
+		koopa_raw_basic_block_t true_bb =
+			koopa_raw_basic_block(mangle("land_rhs"));
+		koopa_raw_basic_block_t end_bb =
+			koopa_raw_basic_block(mangle("land_end"));
+		slice_append(&m_curr_function->bbs, true_bb);
+		slice_append(&m_curr_function->bbs, end_bb);
+
 		/* non-symbol variable, initialize to 0 (false) */
 		koopa_raw_value_t result =
 			koopa_raw_alloc(koopa_raw_name_local(mangle("land")),
@@ -362,38 +364,43 @@ static koopa_raw_value_t Exp(const struct node_t *node)
 		try_append(&m_curr_basic_block->insts, result);
 		try_append(&m_curr_basic_block->insts, init);
 
-		koopa_raw_basic_block_t true_bb =
-			koopa_raw_basic_block(mangle("land_rhs"));
-		koopa_raw_basic_block_t end_bb =
-			koopa_raw_basic_block(mangle("land_end"));
-		slice_append(&m_curr_function->bbs, true_bb);
-		slice_append(&m_curr_function->bbs, end_bb);
-
 		/* if (lhs) */
 		koopa_raw_value_t ltrue =
-			koopa_raw_binary(KOOPA_RBO_NOT_EQ, lhs,
+			koopa_raw_binary(KOOPA_RBO_NOT_EQ,
+					 Exp(node->children[0]),
 					 koopa_raw_integer(0));
 		koopa_raw_value_t branch = koopa_raw_branch(ltrue, true_bb,
 							    end_bb);
 		try_append(&m_curr_basic_block->insts, ltrue);
 		try_append(&m_curr_basic_block->insts, branch);
 
+		m_curr_basic_block = true_bb;
+
 		/* result = rhs; */
 		koopa_raw_value_t rtrue =
-			koopa_raw_binary(KOOPA_RBO_NOT_EQ, rhs,
+			koopa_raw_binary(KOOPA_RBO_NOT_EQ,
+					 Exp(node->children[2]),
 					 koopa_raw_integer(0));
 		koopa_raw_value_t store = koopa_raw_store(rtrue, result);
 		koopa_raw_value_t jump = koopa_raw_jump(end_bb);
 
-		try_append(&true_bb->insts, rtrue);
-		try_append(&true_bb->insts, store);
-		try_append(&true_bb->insts, jump);
+		try_append(&m_curr_basic_block->insts, rtrue);
+		try_append(&m_curr_basic_block->insts, store);
+		try_append(&m_curr_basic_block->insts, jump);
 
 		m_curr_basic_block = end_bb;
 
 		ret = koopa_raw_load(result);
-		}
-		break;
+		goto complete;
+	}
+
+	/* otherwise, binary expression */
+	char *op_token = node->children[1]->data.value.s;
+	koopa_raw_value_t lhs = Exp(node->children[0]);
+	koopa_raw_value_t rhs = Exp(node->children[2]);
+
+	switch (node->children[1]->data.kind)
+	{
 	case AST_EQOP:
 		if (strcmp(op_token, "!=") == 0)
 			ret = koopa_raw_binary(KOOPA_RBO_NOT_EQ, lhs, rhs);
@@ -443,6 +450,7 @@ static koopa_raw_value_t Exp(const struct node_t *node)
 		todo();
 	}
 
+complete:
 	try_append(&m_curr_basic_block->insts, ret);
 
 	return ret;
@@ -491,7 +499,7 @@ static void Stmt(const struct node_t *node)
 		m_returned = true;
 		break;
 	case AST_IF:
-		{
+	{
 		koopa_raw_value_t cond = Exp(node->children[1]);
 
 		koopa_raw_basic_block_t true_bb =
@@ -528,10 +536,10 @@ static void Stmt(const struct node_t *node)
 
 		slice_append(&m_curr_function->bbs, end_bb);
 		m_curr_basic_block = end_bb;
-		}
 		break;
+	}
 	case AST_WHILE:
-		{
+	{
 		koopa_raw_basic_block_t cond_bb =
 			koopa_raw_basic_block(mangle("while_cond"));
 		koopa_raw_basic_block_t body_bb =
@@ -564,10 +572,10 @@ static void Stmt(const struct node_t *node)
 
 		slice_append(&m_curr_function->bbs, end_bb);
 		m_curr_basic_block = end_bb;
-		}
 		break;
+	}
 	case AST_BREAK:
-		{
+	{
 		koopa_raw_basic_block_t break_bb =
 			koopa_raw_basic_block(mangle("while_break"));
 		slice_append(&m_curr_function->bbs, break_bb);
@@ -575,10 +583,10 @@ static void Stmt(const struct node_t *node)
 		try_append(&m_curr_basic_block->insts,
 			   koopa_raw_jump(m_curr_end));
 		m_curr_basic_block = break_bb;
-		}
 		break;
+	}
 	case AST_CONTINUE:
-		{
+	{
 		koopa_raw_basic_block_t continue_bb =
 			koopa_raw_basic_block(mangle("while_continue"));
 		slice_append(&m_curr_function->bbs, continue_bb);
@@ -586,19 +594,19 @@ static void Stmt(const struct node_t *node)
 		try_append(&m_curr_basic_block->insts,
 			   koopa_raw_jump(m_curr_cond));
 		m_curr_basic_block = continue_bb;
-		}
 		break;
+	}
 	default:
 		todo();
 	}
 }
 
-static void FuncDefList(const struct node_t *node)
+static void GlobalList(const struct node_t *node)
 {
-	assert(node && node->data.kind == AST_FuncDefList);
+	assert(node && node->data.kind == AST_GlobalList);
+
 	for (int i = node->size - 1; i >= 0; --i)
-		slice_append(&m_curr_program->funcs,
-			     FuncDef(node->children[i]));
+		Global(node->children[i]);
 }
 
 static koopa_raw_function_t FuncDef(const struct node_t *node)
@@ -607,7 +615,7 @@ static koopa_raw_function_t FuncDef(const struct node_t *node)
 
 	char *name = node->children[1]->data.value.s;
 
-	koopa_raw_type_t ty = FuncType(node->children[0]);
+	koopa_raw_type_t ty = Type(node->children[0]);
 	koopa_raw_function_t ret = koopa_raw_function(ty, name);
 	m_curr_function = ret;
 
@@ -624,7 +632,7 @@ static koopa_raw_function_t FuncDef(const struct node_t *node)
 	if (node->size == 4)
 	{
 		/* has parameters */
-		FuncFParamsList(node->children[2]);
+		FuncFParamList(node->children[2]);
 		Block(node->children[3]);
 	}
 	else
@@ -654,18 +662,31 @@ static koopa_raw_program_t CompUnit(const struct node_t *node)
 	// a problem for now
 	m_curr_program = &ret;
 
-	generate_lib_funcs();
+	init_lib();
 
-	FuncDefList(node->children[0]);
+	GlobalList(node->children[0]);
 
 	return ret;
+}
+
+static void Global(const struct node_t *node)
+{
+	assert(node && node->data.kind == AST_Global);
+
+	if (node->children[0]->data.kind == AST_FuncDef)
+		slice_append(&m_curr_program->funcs,
+			     FuncDef(node->children[0]));
+	else if (node->children[0]->data.kind == AST_Decl)
+		Decl(node->children[0]);
 }
 
 static void Decl(const struct node_t *node)
 {
 	assert(node && node->data.kind == AST_Decl);
 
-	symbols_enter(g_symbols);
+	if (symbols_level(g_symbols) > 0)
+		symbols_enter(g_symbols);
+
 	if (node->children[0]->data.kind == AST_VarDecl)
 		VarDecl(node->children[0]);
 }
@@ -690,7 +711,21 @@ static koopa_raw_value_t VarDef(const struct node_t *node)
 			break;
 	assert(symbol);
 
-	koopa_raw_value_t ret = symbol->variable.raw =
+	koopa_raw_value_t ret;
+	if (symbol->meta.level == 0)
+	{
+		ret = symbol->variable.raw = koopa_raw_global_alloc(
+			koopa_raw_name_global(ident),
+			(node->size == 2)
+				? InitVal(node->children[1])
+				: koopa_raw_zero_init(koopa_raw_type_int32())
+		);
+		slice_append(&m_curr_program->values, ret);
+
+		return ret;
+	}
+
+	ret = symbol->variable.raw =
 		koopa_raw_alloc(koopa_raw_name_local(mangle(ident)),
 				koopa_raw_type_int32());
 
@@ -769,9 +804,9 @@ static void BlockItemList(const struct node_t *node)
 	m_returned = false;
 }
 
-static void FuncRParamsList(const struct node_t *node)
+static void FuncRParamList(const struct node_t *node)
 {
-	assert(node && node->data.kind == AST_FuncRParamsList);
+	assert(node && node->data.kind == AST_FuncRParamList);
 
 	for (int i = node->size - 1; i >= 0; --i)
 		slice_append(&m_curr_call->kind.data.call.args,
@@ -785,9 +820,9 @@ static koopa_raw_value_t FuncRParam(const struct node_t *node)
 	return Exp(node->children[0]);
 }
 
-static void FuncFParamsList(const struct node_t *node)
+static void FuncFParamList(const struct node_t *node)
 {
-	assert(node && node->data.kind == AST_FuncFParamsList);
+	assert(node && node->data.kind == AST_FuncFParamList);
 
 	for (int i = node->size - 1; i >= 0; --i)
 		slice_append(&m_curr_function->params,
@@ -802,11 +837,13 @@ static koopa_raw_value_t FuncFParam(const struct node_t *node)
 	struct symbol_t *symbol = symbols_get(g_symbols, ident);
 	assert(symbol);
 
-	char *name = koopa_raw_name_local(mangle(ident));
+	char *name = koopa_raw_name_global(ident);
 	koopa_raw_value_t ret =
 		koopa_raw_func_arg_ref(name, m_curr_function->params.len);
 	slice_append(&m_curr_function->ty->data.function.params,
 		     koopa_raw_type_int32());
+
+	/* make an alloc for parameter */
 	koopa_raw_value_t alloc = symbol->variable.raw =
 		koopa_raw_alloc(koopa_raw_name_local(ident),
 				koopa_raw_type_int32());

@@ -43,11 +43,11 @@ static void vfree(int count, ...)
 	   LB RB
 
 /* nonterminals */
-%type <n> CompUnit FuncDef FuncType Block Stmt Number
+%type <n> CompUnit FuncDef Type Block Stmt Number
 	  Exp PrimaryExp UnaryExp
-	  Decl ConstDecl BType ConstDef ConstInitVal VarDecl VarDef InitVal
+	  Decl ConstDecl ConstDef ConstInitVal VarDecl VarDef InitVal
 	  BlockItem LVal ConstExp ConstDefList VarDefList BlockItemList
-	  FuncDefList FuncFParamsList FuncFParam FuncRParamsList FuncRParam
+	  FuncFParamList FuncFParam FuncRParamList FuncRParam GlobalList Global
 
 /* association and precedence */
 %left LOR
@@ -66,56 +66,66 @@ static void vfree(int count, ...)
 %%
 
 CompUnit
-	: FuncDefList {
+	: GlobalList {
 		// FIXME yylineno reporting wrong line number
 		$$ = ast_nterm(AST_CompUnit, 1, $1);
 		comp_unit = $$;
 	}
 	;
 
-FuncDefList
-	: FuncDef {
-		$$ = ast_nterm(AST_FuncDefList, 1, $1);
+GlobalList
+	: Global {
+		$$ = ast_nterm(AST_GlobalList, 1, $1);
 	}
-	| FuncDef FuncDefList {
+	| Global GlobalList {
 		$$ = node_add_child($2, $1);
 	}
 	;
 
+Global
+	: Decl {
+		$$ = ast_nterm(AST_Global, 1, $1);
+	}
+	| FuncDef {
+		$$ = ast_nterm(AST_Global, 1, $1);
+	}
+	;
+
 FuncDef
-	: FuncType IDENT LP RP Block {
+	: Type IDENT LP RP Block {
 		$$ = ast_nterm(AST_FuncDef, 3,
 			       $1, ast_term(AST_IDENT, $2), $5);
 		vfree(3, $2, $3, $4);
 	}
-	| FuncType IDENT LP FuncFParamsList RP Block {
+	| Type IDENT LP FuncFParamList RP Block {
 		$$ = ast_nterm(AST_FuncDef, 4,
 			       $1, ast_term(AST_IDENT, $2), $4, $6);
 		vfree(3, $2, $3, $5);
 	}
 	;
 
-FuncFParamsList
+FuncFParamList
 	: FuncFParam {
-		$$ = ast_nterm(AST_FuncFParamsList, 1, $1);
+		$$ = ast_nterm(AST_FuncFParamList, 1, $1);
 	}
-	| FuncFParam COMMA FuncFParamsList {
+	| FuncFParam COMMA FuncFParamList {
 		$$ = node_add_child($3, $1);
 		free($2);
 	}
 	;
 
 FuncFParam
-	: BType IDENT {
+	: Type IDENT {
 		$$ = ast_nterm(AST_FuncFParam, 2, $1, 
 			       ast_term(AST_IDENT, $2));
 		free($2);
 	}
 	;
 
-FuncType
+/* context-sensitive Type (rather than BType and FuncType) */
+Type
 	: TYPE {
-		$$ = ast_nterm(AST_FuncType, 1,
+		$$ = ast_nterm(AST_Type, 1,
 			       ast_term(AST_TYPE, $1));
 		free($1);
 	}
@@ -274,7 +284,7 @@ UnaryExp
 			       ast_term(AST_UNARYOP, $1), $2);
 		free($1);
 	}
-	| IDENT LP FuncRParamsList RP {
+	| IDENT LP FuncRParamList RP {
 		$$ = ast_nterm(AST_UnaryExp, 2,
 			       ast_term(AST_IDENT, $1), $3);
 		vfree(3, $1, $2, $4);
@@ -286,11 +296,11 @@ UnaryExp
 	}
 	;
 
-FuncRParamsList
+FuncRParamList
 	: FuncRParam {
-		$$ = ast_nterm(AST_FuncRParamsList, 1, $1);
+		$$ = ast_nterm(AST_FuncRParamList, 1, $1);
 	}
-	| FuncRParam COMMA FuncRParamsList {
+	| FuncRParam COMMA FuncRParamList {
 		$$ = node_add_child($3, $1);
 		free($2);
 	}
@@ -312,7 +322,7 @@ Decl
 	;
 
 ConstDecl
-	: CONST BType ConstDefList SEMI {
+	: CONST Type ConstDefList SEMI {
 		$$ = ast_nterm(AST_ConstDecl, 2, $2, $3);
 		vfree(2, $1, $4);
 	}
@@ -326,13 +336,6 @@ ConstDefList
 	| ConstDef COMMA ConstDefList {
 		$$ = node_add_child($3, $1);
 		free($2);
-	}
-	;
-
-BType
-	: TYPE {
-		$$ = ast_nterm(AST_BType, 1, ast_term(AST_TYPE, $1));
-		free($1);
 	}
 	;
 
@@ -351,7 +354,7 @@ ConstInitVal
 	;
 
 VarDecl
-	: BType VarDefList SEMI {
+	: Type VarDefList SEMI {
 		$$ = ast_nterm(AST_VarDecl, 2, $1, $2);
 		free($3);
 	}
