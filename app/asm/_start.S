@@ -3,6 +3,8 @@
 _start:
 	la sp, stack_base
 	call main
+halt:
+	j halt
 
 	.section .bss.stack
 	.globl stack_limit

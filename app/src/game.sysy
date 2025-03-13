@@ -29,15 +29,46 @@ int broken_1_3;
 /* object states */
 int ball_v_y, ball_v_x;
 int ball_x, ball_y;
+
 int pad_center = 40;
-int hit_brick_i, hit_brick_j;
-int hit_pad_offs;
 
 /* gameplay states */
 int score = 0;
-int status = 1;
 int life = 2;
+
+int hit_brick_i, hit_brick_j;
+int hit_pad_offs;
+
+/* program status */
+int status = 1;
 int key = 0;
+
+/* procedures */
+void reset_gameplay()
+{
+	score = 0;
+	life = 2;
+}
+
+void reset_ball()
+{
+	ball_v_y = -1;
+	ball_v_x = 2;
+	ball_x = 40;
+	ball_y = 19;
+}
+
+void reset_bricks()
+{
+	broken_0_0 = 0;
+	broken_0_1 = 0;
+	broken_0_2 = 0;
+	broken_0_3 = 0;
+	broken_1_0 = 0;
+	broken_1_1 = 0;
+	broken_1_2 = 0;
+	broken_1_3 = 0;
+}
 
 /* utilities */
 void newline()
@@ -54,6 +85,86 @@ void clear()
 	putch(033);
 	putch(0x5b);
 	putch(0x4a);
+}
+
+/* strings */
+void quit()
+{
+	putch(0x51); // Q
+	putch(0x75); // u
+	putch(0x69); // i
+	putch(0x74); // t
+	newline();
+}
+
+void press_any_key()
+{
+	putch(0x50); // P
+	putch(0x72); // r
+	putch(0x65); // e
+	putch(0x73); // s
+	putch(0x73); // s
+	putch(0x20); // SP
+	putch(0x61); // a
+	putch(0x6e); // n
+	putch(0x79); // y
+	putch(0x20); // SP
+	putch(0x6b); // k
+	putch(0x65); // e
+	putch(0x79); // y
+	putch(0x20); // SP
+	putch(0x74); // t
+	putch(0x6f); // o
+	putch(0x20); // SP
+	putch(0x63); // c
+	putch(0x6f); // o
+	putch(0x6e); // n
+	putch(0x74); // t
+	putch(0x69); // i
+	putch(0x6e); // n
+	putch(0x75); // u
+	putch(0x65); // e
+	putch(0x2e); // .
+	putch(0x2e); // .
+	putch(0x2e); // .
+	newline();
+
+	while (1)
+	{
+		key = getch();
+		if (key)
+			break;
+	}
+
+	status = STATUS_PLAY;
+}
+
+void you_win()
+{
+	putch(0x59); // Y
+	putch(0x6f); // o
+	putch(0x75); // u
+	putch(0x20); // SP
+	putch(0x77); // w
+	putch(0x69); // i
+	putch(0x6e); // n
+	putch(0x21); // !
+	newline();
+}
+
+void you_lose()
+{
+	putch(0x54); // T
+	putch(0x72); // r
+	putch(0x79); // y
+	putch(0x20); // SP
+	putch(0x61); // a
+	putch(0x67); // g
+	putch(0x61); // a
+	putch(0x69); // i
+	putch(0x6e); // n
+	putch(0x21); // !
+	newline();
 }
 
 void pad_move_left(int step)
@@ -115,15 +226,6 @@ int in_brick(int x, int y)
 		x >= BRICK_W * (hit_brick_j + 1) &&
 		x < BRICK_W * (hit_brick_j + 1 + 1) - 2 &&
 		y == BRICK_H * (hit_brick_i + 1));
-}
-
-/* procedures */
-void reset_ball()
-{
-	ball_v_y = -1;
-	ball_v_x = 2;
-	ball_x = 40;
-	ball_y = 19;
 }
 
 void ball_hit()
@@ -200,13 +302,15 @@ void draw()
 	while (y < SCREEN_H) {
 		int x = 0;
 		while (x < SCREEN_W) {
+			if (x == SCREEN_W - 1 && y == SCREEN_H - 1)
+				return;
+
 			if (x == SCREEN_W / 2 && y == SCREEN_H - 1)
 				putch(0x30 + life);
-			else if (x == 0 && y == 0 ||
-				 x == SCREEN_W - 1 && y == SCREEN_H - 1)
+			else if (x == 0 && y == 0)
 				putch(0x2f);
-			else if (x == SCREEN_W - 1 && y == 0 ||
-				 x == 0 && y == SCREEN_H - 1)
+			else if (x == SCREEN_W - 1 && y == 0
+				 || x == 0 && y == SCREEN_H - 1)
 				putch(0x5c);
 			else if (x == ball_x && y == ball_y)
 				putch(0x2a);
@@ -220,6 +324,7 @@ void draw()
 				putch(0x7c);
 			else
 				putch(0x20);
+
 			x = x + 1;
 		}
 		/* raw mode, CRLF for newline */
@@ -248,17 +353,32 @@ void control()
 
 int main()
 {
-	reset_ball();
+	while (status != STATUS_QUIT) {
+		reset_ball();
+		reset_bricks();
+		reset_gameplay();
+		pad_center = 40;
 
-	while (status == STATUS_PLAY) {
-		control();
-		tick();
-		draw();
+		while (status == STATUS_PLAY) {
+			control();
+			tick();
+			draw();
 
-		usleep(50000);
+			usleep(50000);
+		}
+
+		clear();
+
+		if (status == STATUS_WIN)
+			you_win();
+		else if (status == STATUS_LOSE)
+			you_lose();
+		else if (status == STATUS_QUIT)
+			quit();
+
+		if (status != STATUS_QUIT)
+			press_any_key();
 	}
 
-	clear();
-
-	return status;
+	return 0;
 }
