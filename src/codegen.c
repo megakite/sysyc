@@ -337,10 +337,6 @@ static void function_prologue(koopa_raw_function_t function)
 	m_fn.stack_size = -(-(total * sizeof(int32_t)) & -16);
 	emit("  addi sp, sp, %d\n", -m_fn.stack_size);
 	emit("  sw ra, %lu(sp)\n", m_fn.stack_size - sizeof(uint32_t));
-
-	printf("%s(%u): val = %u, var = %u, par = %u, stack = %d\n",
-	       function->name, function->params.len, m_fn.val_count,
-	       m_fn.var_count, m_fn.par_spill, m_fn.stack_size);
 }
 
 static void function_epilogue()

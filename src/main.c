@@ -90,9 +90,11 @@ int main(int argc, char **argv)
 	koopa_raw_program_set_allocator(bump);
 	koopa_raw_program_t raw = ir(comp_unit);
 
+#if 0
 	/* log memory IR */
 	printf("======= Logging memory IR into stderr...\n");
 	debug(&raw);
+#endif
 
 	/* try to convert memory IR into raw koopa program */
 	printf("======= Verifying memory IR integrity...\n");
