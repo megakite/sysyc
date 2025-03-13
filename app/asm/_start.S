@@ -8,5 +8,5 @@ _start:
 	.globl stack_limit
 stack_limit:
 	.space 4096
-	.globl stack_top
+	.globl stack_base
 stack_base:

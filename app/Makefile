@@ -5,7 +5,6 @@ OBJCOPY=	llvm-objcopy
 
 CFLAGS=		-target riscv32-unknown-linux-elf -march=rv32im -mabi=ilp32
 LDFLAGS=	-T linker.ld
-LDFLAGS_USER=	-L $(CDE_LIBRARY_PATH)/riscv32 -lsysy 
 
 SRC_DIR=	src
 SRC_SRCS=	$(shell find src -type f -name "*.sysy")
