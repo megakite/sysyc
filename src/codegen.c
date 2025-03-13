@@ -126,9 +126,12 @@ static void opnd(struct variant_t *variant)
 	switch (variant->tag)
 	{
 	case VALUE:
+		/* immediate */
 		if (variant->value->kind.tag == KOOPA_RVT_INTEGER)
 		{
-			uint32_t value = variant->value->kind.data.integer.value;
+			uint32_t value =
+				variant->value->kind.data.integer.value;
+
 			if (value == 0)
 				yield(emit("x0"));
 
@@ -141,8 +144,9 @@ static void opnd(struct variant_t *variant)
 				emit("  li t%c, %d\n", '5' + m_yield_end,
 				     value);
 		}
-		else
-			++m_bb.reg_idx;
+
+		/* register */
+		++m_bb.reg_idx;
 
 		if (reg_idx < T_MAX)
 			yield(emit("t%d", use(m_bb.reg_idx)));
@@ -150,6 +154,7 @@ static void opnd(struct variant_t *variant)
 			yield(emit("a%d",
 				   use(m_bb.reg_idx) - T_MAX + m_fn.arg_count));
 
+		/* stack */
 		if (variant->value->kind.tag != KOOPA_RVT_INTEGER)
 			emit("  lw t%c, %lu(sp)\n", '5' + m_yield_end, reg_sp);
 
@@ -176,13 +181,24 @@ static void opnd(struct variant_t *variant)
 		yield(emit("%u(sp)", use(variant)->stack));
 		break;
 	case GLOBAL:
+		++m_bb.reg_idx;
+
 		if (reg_idx < T_MAX)
+		{
+			emit("  la t%d, %s\n", reg_idx,
+			     variant->global->name + 1);
 			yield(emit("0(t%d)", use(m_bb.reg_idx)));
+		}
 		else if (reg_idx < R_MAX - regst_args)
+		{
+			emit("  la a%d, %s\n", reg_idx - T_MAX + m_fn.arg_count,
+			     variant->global->name + 1);
 			yield(emit("0(a%d)",
 				   use(m_bb.reg_idx) - T_MAX + m_fn.arg_count));
+		}
 
-		emit("  lw t%c, %lu(sp)\n", '5' + m_yield_end, reg_sp);
+		emit("  la t%c, %s\n", '5' + m_yield_end,
+		     variant->global->name + 1);
 
 		if (m_yield_end == 0)
 			yield(emit("0(t5)"));
@@ -336,12 +352,6 @@ static void function_epilogue()
 /* kind generators */
 static void raw_kind_load(koopa_raw_load_t *load)
 {
-	if (load->src->kind.tag == KOOPA_RVT_GLOBAL_ALLOC)
-	{
-		oper("la", false);
-		emit("%s\n", load->src->name + 1);
-	}
-
 	struct variant_t src = raw_value(load->src);
 
 	inst("lw", &src, NULL);
@@ -379,12 +389,6 @@ static void raw_kind_store(koopa_raw_store_t *store)
 				      + m_fn.stack_size);
 
 		return;
-	}
-
-	if (store->dest->kind.tag == KOOPA_RVT_GLOBAL_ALLOC)
-	{
-		oper("la", false);
-		emit("%s\n", store->dest->name + 1);
 	}
 
 	struct variant_t value = raw_value(store->value);
@@ -580,10 +584,6 @@ static void raw_kind_call(const koopa_raw_call_t *call)
 			     (i + spill_args) * sizeof(int32_t));
 }
 
-static void raw_kind_global_alloc(koopa_raw_global_alloc_t *global_alloc)
-{
-}
-
 /* weird return type... i wonder if there's a better way to backtrack. currently
  * if we're not using `struct variant_t` we'll have to call `htable_lookup()`
  * twice: first in this function, then in `opnd()`.
@@ -624,13 +624,12 @@ static struct variant_t raw_value(koopa_raw_value_t raw)
 		todo();
 		break;
 	case KOOPA_RVT_AGGREGATE:
-		unimplemented();
+		todo();
 		break;
 	case KOOPA_RVT_ALLOC:
 		/* stack */
 		break;
 	case KOOPA_RVT_GLOBAL_ALLOC:
-		raw_kind_global_alloc(&raw->kind.data.global_alloc);
 		return (struct variant_t) { .tag = GLOBAL, .global = raw };
 		break;
 	case KOOPA_RVT_LOAD:
@@ -643,13 +642,9 @@ static struct variant_t raw_value(koopa_raw_value_t raw)
 		break;
 	case KOOPA_RVT_GET_PTR:
 		todo();
-		raw_value(raw->kind.data.get_ptr.src);
-		raw_value(raw->kind.data.get_ptr.index);
 		break;
 	case KOOPA_RVT_GET_ELEM_PTR:
 		todo();
-		raw_value(raw->kind.data.get_elem_ptr.src);
-		raw_value(raw->kind.data.get_elem_ptr.index);
 		break;
 	case KOOPA_RVT_BINARY:
 		raw_kind_binary(&raw->kind.data.binary);

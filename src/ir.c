@@ -141,6 +141,20 @@ static void init_lib(void)
 	symbols_get(g_symbols, "putarray")->function.raw = putarray;
 	symbols_get(g_symbols, "starttime")->function.raw = starttime;
 	symbols_get(g_symbols, "stoptime")->function.raw = stoptime;
+
+#if 1
+	koopa_raw_function_t usleep =
+		koopa_raw_function(
+			koopa_raw_type_function(koopa_raw_type_unit()),
+			"usleep"
+		);
+
+	slice_append(&usleep->ty->data.function.params, koopa_raw_type_int32());
+
+	slice_append(&m_curr_program->funcs, usleep);
+
+	symbols_get(g_symbols, "usleep")->function.raw = usleep;
+#endif
 }
 
 static char *mangle(char *ident)
@@ -703,7 +717,6 @@ static koopa_raw_value_t VarDef(const struct node_t *node)
 	assert(node && node->data.kind == AST_VarDef);
 
 	char *ident = node->children[0]->data.value.s;
-
 	struct symbol_t *symbol;
 	struct view_t view = symbols_lookup(g_symbols, ident);
 	while ((symbol = view.next(&view)))

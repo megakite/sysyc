@@ -92,6 +92,11 @@ static void init_lib(void)
 		    symbol_function(vector_typ_init(2, INT, POINTER), VOID));
 	symbols_add(g_symbols, "starttime", symbol_function(NULL, VOID));
 	symbols_add(g_symbols, "stoptime", symbol_function(NULL, VOID));
+
+#if 1
+	symbols_add(g_symbols, "usleep",
+		    symbol_function(vector_typ_init(1, INT), VOID));
+#endif
 }
 
 /* accessor defn.s */

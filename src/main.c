@@ -86,7 +86,7 @@ int main(int argc, char **argv)
 
 	/* generate memory IR */
 	printf("======= Generating memory IR...\n");
-	bump_t bump = bump_new(128 KiB);
+	bump_t bump = bump_new(4 MiB);
 	koopa_raw_program_set_allocator(bump);
 	koopa_raw_program_t raw = ir(comp_unit);
 
